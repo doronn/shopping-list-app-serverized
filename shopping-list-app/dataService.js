@@ -20,7 +20,7 @@ const DataService = {
     useServer: true,
     // Base URL for the remote API.  For a self‑hosted server this might be
     // something like 'http://localhost:3000/api'.  Keep trailing slash off.
-    serverBaseUrl: '',
+    serverBaseUrl: 'https://shopping-list-app-serverized.onrender.com',
 
     /**
      * Socket.IO client instance.  When using the server, this will be
