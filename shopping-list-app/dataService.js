@@ -18,7 +18,7 @@ const STORAGE_KEY = 'shoppingListData';
 const DataService = {
     // Default to localStorage; set this to true to use the remote server.
     // The flag may be toggled at runtime if server requests fail.
-    useServer: false,
+    useServer: true,
     // Base URL for the remote API.  For a self‑hosted server this might be
     // something like 'http://localhost:3000/api'.  Keep trailing slash off.
     serverBaseUrl: 'https://shopping-list-app-serverized.onrender.com',
