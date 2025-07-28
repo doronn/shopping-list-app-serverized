@@ -16,8 +16,9 @@ const STORAGE_KEY = 'shoppingListData';
  */
 
 const DataService = {
-    // If true, use the remote server; otherwise fall back to localStorage.
-    useServer: true,
+    // Default to localStorage; set this to true to use the remote server.
+    // The flag may be toggled at runtime if server requests fail.
+    useServer: false,
     // Base URL for the remote API.  For a self‑hosted server this might be
     // something like 'http://localhost:3000/api'.  Keep trailing slash off.
     serverBaseUrl: 'https://shopping-list-app-serverized.onrender.com',
@@ -35,18 +36,28 @@ const DataService = {
      * @returns {Promise<Object|null>}
      */
     async loadData() {
-        try {
-            if (this.useServer && this.serverBaseUrl) {
+        // Attempt to load data from the remote API when useServer is enabled.
+        if (this.useServer && this.serverBaseUrl) {
+            try {
                 const resp = await fetch(`${this.serverBaseUrl}/data`);
-                if (!resp.ok) throw new Error('Server returned ' + resp.status);
-                const json = await resp.json();
-                return json;
+                if (resp.ok) {
+                    return await resp.json();
+                }
+                // Non‑OK responses cause a fallback to localStorage.
+                console.warn('Remote load failed with status', resp.status, '- falling back to localStorage');
+                this.useServer = false;
+            } catch (err) {
+                console.error('Failed to load data from server:', err);
+                this.useServer = false;
             }
+        }
+        // Fallback: read from localStorage.
+        try {
             const jsonStr = window.localStorage.getItem(STORAGE_KEY);
             if (!jsonStr) return null;
             return JSON.parse(jsonStr);
         } catch (err) {
-            console.error('Failed to load data', err);
+            console.error('Failed to load data from localStorage', err);
             return null;
         }
     },
@@ -57,19 +68,31 @@ const DataService = {
      * @returns {Promise<void>}
      */
     async saveData(dataObj) {
-        try {
-            if (this.useServer && this.serverBaseUrl) {
-                await fetch(`${this.serverBaseUrl}/data`, {
+        // Try saving to the server when useServer is true.
+        if (this.useServer && this.serverBaseUrl) {
+            try {
+                const resp = await fetch(`${this.serverBaseUrl}/data`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(dataObj)
                 });
-                return;
+                if (resp.ok) {
+                    return;
+                }
+                // Non‑OK responses trigger fallback to localStorage.
+                console.warn('Remote save failed with status', resp.status, '- falling back to localStorage');
+                this.useServer = false;
+            } catch (err) {
+                console.error('Failed to save data to server:', err);
+                this.useServer = false;
             }
+        }
+        // Fallback: store data in localStorage.
+        try {
             const json = JSON.stringify(dataObj);
             window.localStorage.setItem(STORAGE_KEY, json);
         } catch (err) {
-            console.error('Failed to save data', err);
+            console.error('Failed to save data to localStorage', err);
         }
     },
 
@@ -112,14 +135,25 @@ const DataService = {
      * @returns {Promise<void>}
      */
     async clearData() {
-        try {
-            if (this.useServer && this.serverBaseUrl) {
-                await fetch(`${this.serverBaseUrl}/data/clear`, { method: 'POST' });
-                return;
+        // Attempt to clear data via the server when useServer is enabled.
+        if (this.useServer && this.serverBaseUrl) {
+            try {
+                const resp = await fetch(`${this.serverBaseUrl}/data/clear`, { method: 'POST' });
+                if (resp.ok) {
+                    return;
+                }
+                console.warn('Remote clear failed with status', resp.status, '- falling back to localStorage');
+                this.useServer = false;
+            } catch (err) {
+                console.error('Failed to clear data via server:', err);
+                this.useServer = false;
             }
+        }
+        // Fallback: remove data from localStorage.
+        try {
             window.localStorage.removeItem(STORAGE_KEY);
         } catch (err) {
-            console.error('Failed to clear data', err);
+            console.error('Failed to clear localStorage', err);
         }
     }
 };
