@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shopping List App</title>
+    <!-- Simple styles for layout -->
+    <link rel="stylesheet" href="style.css" />
+    <!-- Data service layer to abstract persistence; must be loaded before script.js -->
+    <script defer src="dataService.js"></script>
+    <!-- Socket.io client for real‑time synchronization when connecting to a server.  Loaded from CDN -->
+    <script defer src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+    <script defer src="script.js"></script>
+</head>
+<body>
+    <header>
+        <h1 id="app-title"></h1>
+        <div class="language-toggle">
+            <label for="language-select" id="language-label">Language:</label>
+            <select id="language-select">
+                <option value="en">English</option>
+                <option value="he">עִבְרִית</option>
+            </select>
+        </div>
+    </header>
+    <main>
+        <nav>
+            <button id="tab-lists" class="active"></button>
+            <button id="tab-summary"></button>
+            <button id="tab-items"></button>
+            <button id="tab-archive"></button>
+            <button id="tab-settings"></button>
+        </nav>
+        <section id="page-lists" class="page active">
+            <div class="list-header">
+                <h2 id="lists-title"></h2>
+                <button id="add-list-button"></button>
+            </div>
+            <ul id="list-container"></ul>
+        </section>
+        <section id="page-summary" class="page">
+            <h2 id="summary-title"></h2>
+            <div class="receipt-upload">
+                <label id="receipt-label" for="receipt-input"></label>
+                <input type="file" id="receipt-input" multiple />
+                <div id="receipt-list"></div>
+            </div>
+            <div id="summary-content"></div>
+        </section>
+
+        <!-- Global Items Management Page -->
+        <section id="page-items" class="page">
+            <h2 id="items-title"></h2>
+            <div class="global-items-header">
+                <button id="add-global-item-button"></button>
+            </div>
+            <ul id="global-items-container"></ul>
+        </section>
+
+        <!-- Purchase Archive Page -->
+        <section id="page-archive" class="page">
+            <h2 id="archive-title"></h2>
+            <div id="archive-content"></div>
+        </section>
+        <section id="page-settings" class="page">
+            <h2 id="settings-title"></h2>
+            <div>
+                <label for="default-currency" id="currency-label"></label>
+                <input type="text" id="default-currency" value="₪" />
+            </div>
+        <div class="categories-settings">
+            <h3 id="categories-title"></h3>
+            <div class="add-category-form">
+                <input type="text" id="new-category-input" />
+                <button id="add-category-button"></button>
+            </div>
+            <ul id="categories-container"></ul>
+        </div>
+
+        <!-- Import/Export section -->
+        <div class="import-export">
+            <h3 id="import-title"></h3>
+            <label id="import-label" for="import-textarea"></label>
+            <textarea id="import-textarea" rows="4" style="width:100%;"></textarea>
+            <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
+                <button id="import-button"></button>
+                <button id="export-csv-button"></button>
+            </div>
+        </div>
+
+        <!-- Clear data section -->
+        <div class="clear-data-section" style="margin-top:1rem;">
+            <button id="clear-data-button"></button>
+        </div>
+        </section>
+    </main>
+    <!-- Modal for creating/editing lists -->
+    <div id="modal-overlay" class="hidden">
+        <div id="modal" class="modal">
+            <h3 id="modal-title"></h3>
+            <label id="list-name-label" for="list-name-input"></label>
+            <input type="text" id="list-name-input" />
+            <div class="modal-actions">
+                <button id="save-list"></button>
+                <button id="cancel-modal"></button>
+            </div>
+        </div>
+    </div>
+    <!-- Modal for adding/editing items -->
+    <div id="item-modal-overlay" class="hidden">
+        <div id="item-modal" class="modal">
+            <h3 id="item-modal-title"></h3>
+            <label id="item-name-label" for="item-name-input"></label>
+            <!-- Provide datalist for global item suggestions -->
+            <input type="text" id="item-name-input" list="global-item-suggestions" />
+            <datalist id="global-item-suggestions"></datalist>
+            <label id="item-category-label" for="item-category-select"></label>
+            <select id="item-category-select"></select>
+            <label id="item-quantity-label" for="item-quantity-input"></label>
+            <input type="number" id="item-quantity-input" min="1" value="1" />
+            <label id="item-unit-label" for="item-unit-select"></label>
+            <select id="item-unit-select">
+                <option value="piece">piece</option>
+                <option value="kg">kg</option>
+                <option value="liter">liter</option>
+                <option value="package">package</option>
+            </select>
+            <label id="item-price-label" for="item-price-input"></label>
+            <input type="number" id="item-price-input" step="0.01" min="0" value="0" />
+
+            <!-- Price basis quantity input for complex pricing -->
+            <label id="item-price-basis-label" for="item-price-basis-input"></label>
+            <input type="number" id="item-price-basis-input" step="0.01" min="0.01" value="1" />
+            <label id="item-notes-label" for="item-notes-input"></label>
+            <textarea id="item-notes-input"></textarea>
+            <div class="modal-actions">
+                <button id="save-item"></button>
+                <button id="cancel-item-modal"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay for list details (items management) -->
+    <div id="list-details-overlay" class="hidden">
+        <div id="list-details" class="modal">
+            <h3 id="list-details-title"></h3>
+            <!-- Search input to filter items -->
+            <input type="text" id="item-search" placeholder="" />
+            <ul id="items-container"></ul>
+            <div class="list-details-actions">
+                <button id="add-item-button"></button>
+                <button id="complete-list-button"></button>
+                <button id="close-list-details"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for creating/editing global items -->
+    <div id="global-item-modal-overlay" class="hidden">
+        <div id="global-item-modal" class="modal">
+            <h3 id="global-item-modal-title"></h3>
+            <label id="global-name-label" for="global-name-input"></label>
+            <input type="text" id="global-name-input" />
+            <label id="global-category-label" for="global-category-select"></label>
+            <select id="global-category-select"></select>
+            <label id="global-price-label" for="global-price-input"></label>
+            <input type="number" id="global-price-input" step="0.01" min="0" />
+            <label id="global-unit-label" for="global-unit-select"></label>
+            <select id="global-unit-select">
+                <option value="piece">piece</option>
+                <option value="kg">kg</option>
+                <option value="liter">liter</option>
+                <option value="package">package</option>
+            </select>
+            <div class="modal-actions">
+                <button id="save-global-item"></button>
+                <button id="cancel-global-item-modal"></button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
