@@ -170,20 +170,22 @@ const isMobile = /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.tes
 // Update datalist options for global item suggestions
 function updateGlobalItemSuggestions() {
     const datalist = document.getElementById('global-item-suggestions');
-    if (datalist) {
-        datalist.innerHTML = '';
-        // Use a Set to avoid duplicate names (case-insensitive)
-        const seen = new Set();
-        data.globalItems.forEach(item => {
-            const nameLower = item.name.toLowerCase();
-            if (!seen.has(nameLower)) {
-                seen.add(nameLower);
-                const opt = document.createElement('option');
-                opt.value = item.name;
-                datalist.appendChild(opt);
-            }
-        });
+    if (!datalist) {
+        updateCustomSuggestions();
+        return;
     }
+    datalist.innerHTML = '';
+    // Use a Set to avoid duplicate names (case-insensitive)
+    const seen = new Set();
+    data.globalItems.forEach(item => {
+        const nameLower = item.name.toLowerCase();
+        if (!seen.has(nameLower)) {
+            seen.add(nameLower);
+            const opt = document.createElement('option');
+            opt.value = item.name;
+            datalist.appendChild(opt);
+        }
+    });
     updateCustomSuggestions();
 }
 
