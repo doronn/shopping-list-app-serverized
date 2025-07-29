@@ -30,6 +30,7 @@ const translations = {
         close: "Close",
         manage_items: "Manage Items",
         rename_list: "Rename",
+        edit_global_item: "Edit",
         delete_list: "Delete",
         category_produce: "Produce",
         category_dairy: "Dairy",
@@ -101,6 +102,7 @@ const translations = {
         close: "סגור",
         manage_items: "ניהול פריטים",
         rename_list: "שנה שם",
+        edit_global_item: "ערוך",
         delete_list: "מחק",
         category_produce: "ירקות ופירות",
         category_dairy: "מוצרי חלב",
@@ -512,7 +514,7 @@ function renderGlobalItems() {
         li.appendChild(info);
         // Edit button
         const editBtn = document.createElement('button');
-        editBtn.textContent = t.rename_list;
+        editBtn.textContent = t.edit_global_item;
         editBtn.addEventListener('click', () => openGlobalItemModal(item.id));
         li.appendChild(editBtn);
         // Delete button
