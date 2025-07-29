@@ -112,8 +112,11 @@
             <h3 id="item-modal-title"></h3>
             <label id="item-name-label" for="item-name-input"></label>
             <!-- Provide datalist for global item suggestions -->
-            <input type="text" id="item-name-input" list="global-item-suggestions" />
-            <datalist id="global-item-suggestions"></datalist>
+            <div style="position:relative;">
+                <input type="text" id="item-name-input" list="global-item-suggestions" />
+                <datalist id="global-item-suggestions"></datalist>
+                <div id="item-suggestions" class="suggestions hidden"></div>
+            </div>
             <label id="item-category-label" for="item-category-select"></label>
             <select id="item-category-select"></select>
             <label id="item-quantity-label" for="item-quantity-input"></label>

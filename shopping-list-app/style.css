@@ -304,3 +304,23 @@ nav button.active {
 #item-modal-overlay .modal textarea {
     max-width: 100%;
 }
+
+/* Suggestions dropdown for item name input */
+.suggestions {
+    position: absolute;
+    background: #fff;
+    border: 1px solid #ccc;
+    max-height: 150px;
+    overflow-y: auto;
+    width: 100%;
+    z-index: 1100;
+}
+
+.suggestions div {
+    padding: 0.25rem;
+    cursor: pointer;
+}
+
+.suggestions div:hover {
+    background: #eee;
+}
