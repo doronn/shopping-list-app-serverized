@@ -1457,8 +1457,10 @@ window.onRemoteDataUpdated = function(remoteData) {
     data.categories = data.categories || [];
     data.archivedLists = data.archivedLists || [];
     data.receipts = data.receipts || [];
-    // Save the remote data to local persistence as well
-    window.DataService.saveData(data);
+    // DataService.initSocket() already persisted the remote data to
+    // localStorage when it received the event. Avoid saving again here
+    // to prevent an update loop that would broadcast the data back to
+    // the server and trigger another 'dataUpdated' event.
     // Update UI
     renderLists();
     renderSummary();
