@@ -21,7 +21,7 @@ const DataService = {
     useServer: true,
     // Base URL for the remote API.  For a self‑hosted server this might be
     // something like 'http://localhost:3000/api'.  Keep trailing slash off.
-    serverBaseUrl: 'https://shopping-list-app-serverized.onrender.com',
+    serverBaseUrl: window.location.origin,
 
     /**
      * Socket.IO client instance.  When using the server, this will be
@@ -45,10 +45,8 @@ const DataService = {
                 }
                 // Non‑OK responses cause a fallback to localStorage.
                 console.warn('Remote load failed with status', resp.status, '- falling back to localStorage');
-                this.useServer = false;
             } catch (err) {
                 console.error('Failed to load data from server:', err);
-                this.useServer = false;
             }
         }
         // Fallback: read from localStorage.
@@ -81,10 +79,8 @@ const DataService = {
                 }
                 // Non‑OK responses trigger fallback to localStorage.
                 console.warn('Remote save failed with status', resp.status, '- falling back to localStorage');
-                this.useServer = false;
             } catch (err) {
                 console.error('Failed to save data to server:', err);
-                this.useServer = false;
             }
         }
         // Fallback: store data in localStorage.
@@ -143,10 +139,8 @@ const DataService = {
                     return;
                 }
                 console.warn('Remote clear failed with status', resp.status, '- falling back to localStorage');
-                this.useServer = false;
             } catch (err) {
                 console.error('Failed to clear data via server:', err);
-                this.useServer = false;
             }
         }
         // Fallback: remove data from localStorage.

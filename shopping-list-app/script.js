@@ -182,6 +182,7 @@ function updateGlobalItemSuggestions() {
             datalist.appendChild(opt);
         }
     });
+    updateCustomSuggestions();
 }
 
 // Handle input for item name to auto-fill category and unit when matching a global item
@@ -202,6 +203,32 @@ function handleItemNameInput() {
             priceInput.placeholder = globalItem.estimatedPrice != null ? globalItem.estimatedPrice.toString() : '';
         }
     }
+    updateCustomSuggestions();
+}
+
+// Custom suggestions dropdown for mobile browsers where datalist is unreliable
+function updateCustomSuggestions() {
+    const container = document.getElementById('item-suggestions');
+    const input = document.getElementById('item-name-input');
+    if (!container || !input) return;
+    const term = input.value.trim().toLowerCase();
+    container.innerHTML = '';
+    if (!term) {
+        container.classList.add('hidden');
+        return;
+    }
+    const matches = data.globalItems.filter(g => g.name.toLowerCase().includes(term)).slice(0, 5);
+    matches.forEach(item => {
+        const div = document.createElement('div');
+        div.textContent = item.name;
+        div.addEventListener('click', () => {
+            input.value = item.name;
+            container.classList.add('hidden');
+            handleItemNameInput();
+        });
+        container.appendChild(div);
+    });
+    container.classList.toggle('hidden', matches.length === 0);
 }
 
 // Utility functions for localStorage
@@ -710,9 +737,9 @@ function renderItems(list) {
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.checked = item.isChecked;
-            checkbox.addEventListener('change', () => {
+            checkbox.addEventListener('change', async () => {
                 item.isChecked = checkbox.checked;
-                saveData();
+                await saveData();
                 renderItems(list);
                 renderLists();
                 renderSummary();
@@ -1031,6 +1058,13 @@ function setupEvents() {
     const itemNameInput = document.getElementById('item-name-input');
     if (itemNameInput) {
         itemNameInput.addEventListener('input', handleItemNameInput);
+        document.addEventListener('click', (e) => {
+            const sug = document.getElementById('item-suggestions');
+            if (!sug || !itemNameInput) return;
+            if (!itemNameInput.contains(e.target) && !sug.contains(e.target)) {
+                sug.classList.add('hidden');
+            }
+        });
     }
 }
 
@@ -1470,4 +1504,11 @@ window.onRemoteDataUpdated = function(remoteData) {
     renderArchive();
     renderCategories();
     updateGlobalItemSuggestions();
+    if (editingItemListId) {
+        const listArr = editingArchive ? data.archivedLists : data.lists;
+        const current = listArr.find(l => l.id === editingItemListId);
+        if (current) {
+            renderItems(current);
+        }
+    }
 };
