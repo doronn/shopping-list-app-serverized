@@ -1394,11 +1394,11 @@ function exportToCSV() {
 }
 
 // Clear all data from localStorage and reset app
-function clearAllData() {
+async function clearAllData() {
     const t = translations[currentLanguage];
     if (!confirm(t.confirm_clear)) return;
     // Use DataService to clear persisted data
-    window.DataService.clearData();
+    await window.DataService.clearData();
     // Reset in-memory data to defaults
     data = {
         lists: [],
@@ -1408,8 +1408,8 @@ function clearAllData() {
         receipts: []
     };
     // Reload default categories and save to storage
-    loadData();
-    saveData();
+    await loadData();
+    await saveData();
     // Re-render all views
     renderLists();
     renderSummary();
