@@ -165,11 +165,15 @@ let editingItemId = null;
 let itemSearchTerm = '';
 let editingGlobalItemId = null;
 let editingArchive = false;
+const isMobile = /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.test(navigator.userAgent);
 
 // Update datalist options for global item suggestions
 function updateGlobalItemSuggestions() {
     const datalist = document.getElementById('global-item-suggestions');
-    if (!datalist) return;
+    if (!datalist) {
+        updateCustomSuggestions();
+        return;
+    }
     datalist.innerHTML = '';
     // Use a Set to avoid duplicate names (case-insensitive)
     const seen = new Set();
@@ -192,6 +196,7 @@ function handleItemNameInput() {
     const val = input.value.trim();
     const globalItem = data.globalItems.find(g => g.name.toLowerCase() === val.toLowerCase());
     if (globalItem) {
+        input.dataset.selectedId = globalItem.id;
         // Fill category and unit from global item
         const catSelect = document.getElementById('item-category-select');
         if (catSelect) catSelect.value = globalItem.categoryId;
@@ -202,6 +207,8 @@ function handleItemNameInput() {
         if (priceInput) {
             priceInput.placeholder = globalItem.estimatedPrice != null ? globalItem.estimatedPrice.toString() : '';
         }
+    } else {
+        delete input.dataset.selectedId;
     }
     updateCustomSuggestions();
 }
@@ -211,6 +218,10 @@ function updateCustomSuggestions() {
     const container = document.getElementById('item-suggestions');
     const input = document.getElementById('item-name-input');
     if (!container || !input) return;
+    if (!isMobile) {
+        container.classList.add('hidden');
+        return;
+    }
     const term = input.value.trim().toLowerCase();
     container.innerHTML = '';
     if (!term) {
@@ -223,6 +234,7 @@ function updateCustomSuggestions() {
         div.textContent = item.name;
         div.addEventListener('click', () => {
             input.value = item.name;
+            input.dataset.selectedId = item.id;
             container.classList.add('hidden');
             handleItemNameInput();
         });
@@ -814,7 +826,13 @@ function openItemModal(listId, itemId = null) {
         const item = list.items.find(i => i.id === itemId);
         // Derive global item
         const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-        document.getElementById('item-name-input').value = globalItem ? globalItem.name : '';
+        const nameInput = document.getElementById('item-name-input');
+        nameInput.value = globalItem ? globalItem.name : '';
+        if (globalItem) {
+            nameInput.dataset.selectedId = globalItem.id;
+        } else {
+            delete nameInput.dataset.selectedId;
+        }
         // Category comes from global item
         document.getElementById('item-category-select').value = globalItem ? globalItem.categoryId : data.categories[0].id;
         // Quantity and unit
@@ -826,7 +844,9 @@ function openItemModal(listId, itemId = null) {
         document.getElementById('item-notes-input').value = item.notes || '';
     } else {
         title.textContent = t.item_modal_new;
-        document.getElementById('item-name-input').value = '';
+        const nameInput = document.getElementById('item-name-input');
+        nameInput.value = '';
+        delete nameInput.dataset.selectedId;
         // Default values
         document.getElementById('item-category-select').value = data.categories[0].id;
         document.getElementById('item-quantity-input').value = 1;
@@ -839,14 +859,18 @@ function openItemModal(listId, itemId = null) {
 }
 
 function closeItemModal() {
-    document.getElementById('item-modal-overlay').classList.add('hidden');
+    const overlay = document.getElementById('item-modal-overlay');
+    overlay.classList.add('hidden');
+    const nameInput = document.getElementById('item-name-input');
+    if (nameInput) delete nameInput.dataset.selectedId;
 }
 
 // Save item (new or edited)
 function saveItem() {
     const list = (editingArchive ? data.archivedLists : data.lists).find(l => l.id === editingItemListId);
     if (!list) return;
-    const name = document.getElementById('item-name-input').value.trim();
+    const nameInput = document.getElementById('item-name-input');
+    const name = nameInput.value.trim();
     const categoryId = document.getElementById('item-category-select').value;
     const quantity = parseFloat(document.getElementById('item-quantity-input').value) || 1;
     const quantityUnit = document.getElementById('item-unit-select').value || 'piece';
@@ -857,8 +881,14 @@ function saveItem() {
     const notes = document.getElementById('item-notes-input').value.trim();
     if (!name) return;
     // Determine global item reference
-    // Find existing global item by name and category
-    let globalItem = data.globalItems.find(g => g.name.toLowerCase() === name.toLowerCase() && g.categoryId === categoryId);
+    let globalItem = null;
+    if (nameInput.dataset.selectedId) {
+        globalItem = data.globalItems.find(g => g.id === nameInput.dataset.selectedId);
+    }
+    if (!globalItem) {
+        // Find existing global item by name and category
+        globalItem = data.globalItems.find(g => g.name.toLowerCase() === name.toLowerCase() && g.categoryId === categoryId);
+    }
     if (!globalItem) {
         // Create new global item; use estimated price from actual price input if provided, otherwise 0
         const estimated = price != null ? price : 0;
@@ -1057,6 +1087,9 @@ function setupEvents() {
     // Auto-fill item info when selecting a global item name
     const itemNameInput = document.getElementById('item-name-input');
     if (itemNameInput) {
+        if (isMobile) {
+            itemNameInput.removeAttribute('list');
+        }
         itemNameInput.addEventListener('input', handleItemNameInput);
         document.addEventListener('click', (e) => {
             const sug = document.getElementById('item-suggestions');
