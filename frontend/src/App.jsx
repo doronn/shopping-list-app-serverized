@@ -4,7 +4,7 @@ import './App.css'
 
 const initialData = { lists: [], globalItems: [], categories: [], archivedLists: [], receipts: [] }
 
-function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive }) {
+function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive, onRename }) {
   const [name, setName] = useState('')
   return (
     <div className="page">
@@ -15,6 +15,10 @@ function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive }) {
             <button onClick={() => onOpen(l.id)}>{l.name}</button>
             <div className="actions">
               <button onClick={() => onArchive(l.id)}>Archive</button>
+              <button onClick={() => {
+                const newName = window.prompt('Rename list', l.name)
+                if (newName) onRename(l.id, newName)
+              }}>Rename</button>
               <button onClick={() => onDelete(l.id)}>Delete</button>
             </div>
           </li>
@@ -41,7 +45,7 @@ function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive }) {
   )
 }
 
-function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem }) {
+function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, onRenameItem }) {
   const [itemName, setItemName] = useState('')
   return (
     <div className="page">
@@ -57,7 +61,13 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem }
               />
               {it.name}
             </label>
-            <button onClick={() => onDeleteItem(it.id)}>Delete</button>
+            <div className="actions">
+              <button onClick={() => {
+                const newName = window.prompt('Rename item', it.name)
+                if (newName) onRenameItem(it.id, newName)
+              }}>Rename</button>
+              <button onClick={() => onDeleteItem(it.id)}>Delete</button>
+            </div>
           </li>
         ))}
       </ul>
@@ -83,13 +93,24 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem }
   )
 }
 
-function ItemsPage({ items, onAdd }) {
+function ItemsPage({ items, onAdd, onRename, onDelete }) {
   const [name, setName] = useState('')
   return (
     <div className="page">
       <h2>Items</h2>
       <ul className="simple-list">
-        {items.map(i => <li key={i.id}>{i.name}</li>)}
+        {items.map(i => (
+          <li key={i.id}>
+            {i.name}
+            <div className="actions">
+              <button onClick={() => {
+                const newName = window.prompt('Rename item', i.name)
+                if (newName) onRename(i.id, newName)
+              }}>Rename</button>
+              <button onClick={() => onDelete(i.id)}>Delete</button>
+            </div>
+          </li>
+        ))}
       </ul>
       <div className="add-form">
         <input
@@ -112,13 +133,24 @@ function ItemsPage({ items, onAdd }) {
   )
 }
 
-function CategoriesPage({ categories, onAdd }) {
+function CategoriesPage({ categories, onAdd, onRename, onDelete }) {
   const [name, setName] = useState('')
   return (
     <div className="page">
       <h2>Categories</h2>
       <ul className="simple-list">
-        {categories.map(c => <li key={c.id}>{c.name}</li>)}
+        {categories.map(c => (
+          <li key={c.id}>
+            {c.name}
+            <div className="actions">
+              <button onClick={() => {
+                const newName = window.prompt('Rename category', c.name)
+                if (newName) onRename(c.id, newName)
+              }}>Rename</button>
+              <button onClick={() => onDelete(c.id)}>Delete</button>
+            </div>
+          </li>
+        ))}
       </ul>
       <div className="add-form">
         <input
@@ -154,6 +186,45 @@ function ArchivePage({ archived }) {
   )
 }
 
+function SummaryPage({ lists }) {
+  return (
+    <div className="page">
+      <h2>Summary</h2>
+      <ul className="simple-list">
+        {lists.map(l => {
+          const purchased = l.items.filter(i => i.purchased).length
+          return (
+            <li key={l.id}>
+              {l.name}: {purchased}/{l.items.length} purchased
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+function SettingsPage({ onImport, exportData, onClear }) {
+  const [text, setText] = useState('')
+  return (
+    <div className="page">
+      <h2>Settings</h2>
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        rows={4}
+        style={{ width: '100%' }}
+        placeholder="Paste JSON here"
+      />
+      <div className="add-form" style={{ marginTop: '0.5rem' }}>
+        <button onClick={() => onImport(text)}>Import</button>
+        <button onClick={() => setText(exportData())}>Export</button>
+        <button onClick={onClear}>Clear Data</button>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [data, setData] = useState(initialData)
   const [loaded, setLoaded] = useState(false)
@@ -185,6 +256,13 @@ function App() {
     setData(d => ({ ...d, lists: [...d.lists, { id: 'list-' + Date.now(), name, items: [] }] }))
   }
 
+  const renameList = (id, name) => {
+    setData(d => ({
+      ...d,
+      lists: d.lists.map(l => (l.id === id ? { ...l, name } : l))
+    }))
+  }
+
   const deleteList = id => {
     setData(d => ({ ...d, lists: d.lists.filter(l => l.id !== id) }))
   }
@@ -205,8 +283,30 @@ function App() {
     setData(d => ({ ...d, categories: [...d.categories, { id: 'cat-' + Date.now(), name }] }))
   }
 
+  const renameCategory = (id, name) => {
+    setData(d => ({
+      ...d,
+      categories: d.categories.map(c => (c.id === id ? { ...c, name } : c))
+    }))
+  }
+
+  const deleteCategory = id => {
+    setData(d => ({ ...d, categories: d.categories.filter(c => c.id !== id) }))
+  }
+
   const addGlobalItem = name => {
     setData(d => ({ ...d, globalItems: [...d.globalItems, { id: 'global-' + Date.now(), name }] }))
+  }
+
+  const renameGlobalItem = (id, name) => {
+    setData(d => ({
+      ...d,
+      globalItems: d.globalItems.map(i => (i.id === id ? { ...i, name } : i))
+    }))
+  }
+
+  const deleteGlobalItem = id => {
+    setData(d => ({ ...d, globalItems: d.globalItems.filter(i => i.id !== id) }))
   }
 
   const openList = id => {
@@ -225,6 +325,20 @@ function App() {
       lists: d.lists.map(l =>
         l.id === activeListId
           ? { ...l, items: [...l.items, { id: 'item-' + Date.now(), name, purchased: false }] }
+          : l
+      )
+    }))
+  }
+
+  const renameItem = (itemId, name) => {
+    setData(d => ({
+      ...d,
+      lists: d.lists.map(l =>
+        l.id === activeListId
+          ? {
+              ...l,
+              items: l.items.map(it => (it.id === itemId ? { ...it, name } : it))
+            }
           : l
       )
     }))
@@ -255,6 +369,23 @@ function App() {
     }))
   }
 
+  const importData = jsonStr => {
+    try {
+      const obj = JSON.parse(jsonStr)
+      setData(obj)
+    } catch {
+      window.alert('Invalid JSON')
+    }
+  }
+
+  const exportData = () => JSON.stringify(data, null, 2)
+
+  const clearAll = () => {
+    if (window.confirm('Clear all data?')) {
+      setData(initialData)
+    }
+  }
+
   return (
     <div className="App">
       <nav className="main-nav">
@@ -262,6 +393,8 @@ function App() {
         <button onClick={() => setTab('items')}>Items</button>
         <button onClick={() => setTab('categories')}>Categories</button>
         <button onClick={() => setTab('archive')}>Archive</button>
+        <button onClick={() => setTab('summary')}>Summary</button>
+        <button onClick={() => setTab('settings')}>Settings</button>
       </nav>
       {tab === 'lists' && (
         <ListsPage
@@ -270,6 +403,7 @@ function App() {
           onOpen={openList}
           onDelete={deleteList}
           onArchive={archiveList}
+          onRename={renameList}
         />
       )}
       {tab === 'listDetails' && activeListId && (
@@ -279,11 +413,30 @@ function App() {
           onAddItem={addItemToList}
           onToggleItem={toggleItem}
           onDeleteItem={deleteItem}
+          onRenameItem={renameItem}
         />
       )}
-      {tab === 'items' && <ItemsPage items={data.globalItems} onAdd={addGlobalItem} />}
-      {tab === 'categories' && <CategoriesPage categories={data.categories} onAdd={addCategory} />}
+      {tab === 'items' && (
+        <ItemsPage
+          items={data.globalItems}
+          onAdd={addGlobalItem}
+          onRename={renameGlobalItem}
+          onDelete={deleteGlobalItem}
+        />
+      )}
+      {tab === 'categories' && (
+        <CategoriesPage
+          categories={data.categories}
+          onAdd={addCategory}
+          onRename={renameCategory}
+          onDelete={deleteCategory}
+        />
+      )}
       {tab === 'archive' && <ArchivePage archived={data.archivedLists} />}
+      {tab === 'summary' && <SummaryPage lists={data.lists} />}
+      {tab === 'settings' && (
+        <SettingsPage onImport={importData} exportData={exportData} onClear={clearAll} />
+      )}
     </div>
   )
 }
