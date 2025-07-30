@@ -1,0 +1,40 @@
+export const translations = {
+  en: {
+    lists: 'Lists',
+    items: 'Items',
+    categories: 'Categories',
+    archive: 'Archive',
+    summary: 'Summary',
+    settings: 'Settings',
+    new_list: 'New list',
+    new_item: 'New item',
+    quantity: 'Qty',
+    unit: 'Unit',
+    rename: 'Rename',
+    delete: 'Delete',
+    add: 'Add',
+    back: 'Back to Lists',
+    language: 'Language:',
+    new_category: 'New category',
+    total_cost: 'Total'
+  },
+  he: {
+    lists: 'רשימות',
+    items: 'פריטים',
+    categories: 'קטגוריות',
+    archive: 'ארכיון',
+    summary: 'סיכום',
+    settings: 'הגדרות',
+    new_list: 'רשימה חדשה',
+    new_item: 'פריט חדש',
+    quantity: 'כמות',
+    unit: 'יחידה',
+    rename: 'שנה',
+    delete: 'מחק',
+    add: 'הוסף',
+    back: 'חזרה לרשימות',
+    language: 'שפה:',
+    new_category: 'קטגוריה חדשה',
+    total_cost: 'סה"כ'
+  }
+}

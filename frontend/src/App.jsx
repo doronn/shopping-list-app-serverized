@@ -1,6 +1,19 @@
 import { useEffect, useState, useRef } from 'react'
 import DataService from './dataService'
+import { translations } from './i18n'
 import './App.css'
+
+function useTranslation() {
+  const [lang, setLang] = useState(() =>
+    window.localStorage.getItem('lang') || 'en'
+  )
+  useEffect(() => {
+    window.localStorage.setItem('lang', lang)
+    document.documentElement.dir = lang === 'he' ? 'rtl' : 'ltr'
+  }, [lang])
+  const t = key => translations[lang][key] || key
+  return { t, lang, setLang }
+}
 
 // Provide a basic initial state so the app has one category to choose from
 const initialData = {
@@ -11,22 +24,22 @@ const initialData = {
   receipts: []
 }
 
-function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive, onRename }) {
+function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive, onRename, t }) {
   const [name, setName] = useState('')
   return (
     <div className="page">
-      <h2>Lists</h2>
+      <h2>{t('lists')}</h2>
       <ul className="simple-list">
         {lists.map(l => (
           <li key={l.id}>
             <button onClick={() => onOpen(l.id)}>{l.name}</button>
             <div className="actions">
-              <button onClick={() => onArchive(l.id)}>Archive</button>
+              <button onClick={() => onArchive(l.id)}>{t('archive')}</button>
               <button onClick={() => {
-                const newName = window.prompt('Rename list', l.name)
+                const newName = window.prompt(t('rename'), l.name)
                 if (newName) onRename(l.id, newName)
-              }}>Rename</button>
-              <button onClick={() => onDelete(l.id)}>Delete</button>
+              }}>{t('rename')}</button>
+              <button onClick={() => onDelete(l.id)}>{t('delete')}</button>
             </div>
           </li>
         ))}
@@ -35,7 +48,7 @@ function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive, onRename }) {
         <input
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder="New list"
+          placeholder={t('new_list')}
         />
         <button
           onClick={() => {
@@ -44,23 +57,30 @@ function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive, onRename }) {
               setName('')
             }
           }}
-        >
-          Add
-        </button>
+        >{t('add')}</button>
       </div>
     </div>
   )
 }
 
-function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, onRenameItem }) {
+function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, onRenameItem, globalItems, t }) {
   const [itemName, setItemName] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [unit, setUnit] = useState('piece')
+  const [filter, setFilter] = useState('')
+  const filtered = list.items.filter(it => it.name.toLowerCase().includes(filter.toLowerCase()))
+  const suggestions = globalItems.filter(g => g.name.toLowerCase().includes(itemName.toLowerCase())).slice(0,5)
   return (
     <div className="page">
       <h2>{list.name}</h2>
+      <input
+        placeholder="Search"
+        value={filter}
+        onChange={e => setFilter(e.target.value)}
+        style={{ marginBottom: '0.5rem' }}
+      />
       <ul className="simple-list">
-        {list.items.map(it => (
+        {filtered.map(it => (
           <li key={it.id}>
             <label>
               <input
@@ -72,10 +92,10 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
             </label>
             <div className="actions">
               <button onClick={() => {
-                const newName = window.prompt('Rename item', it.name)
+                const newName = window.prompt(t('rename'), it.name)
                 if (newName) onRenameItem(it.id, newName)
-              }}>Rename</button>
-              <button onClick={() => onDeleteItem(it.id)}>Delete</button>
+              }}>{t('rename')}</button>
+              <button onClick={() => onDeleteItem(it.id)}>{t('delete')}</button>
             </div>
           </li>
         ))}
@@ -84,8 +104,14 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
         <input
           value={itemName}
           onChange={e => setItemName(e.target.value)}
-          placeholder="New item"
+          placeholder={t('new_item')}
+          list="suggestions"
         />
+        <datalist id="suggestions">
+          {suggestions.map(s => (
+            <option key={s.id} value={s.name} />
+          ))}
+        </datalist>
         <input
           type="number"
           style={{ width: '4rem' }}
@@ -107,33 +133,31 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
               setQuantity(1)
             }
           }}
-        >
-          Add
-        </button>
+        >{t('add')}</button>
       </div>
-      <button onClick={onBack}>Back to Lists</button>
+      <button onClick={onBack}>{t('back')}</button>
     </div>
   )
 }
 
-function ItemsPage({ items, categories, onAdd, onRename, onDelete }) {
+function ItemsPage({ items, categories, onAdd, onRename, onDelete, t }) {
   const [name, setName] = useState('')
   const [categoryId, setCategoryId] = useState(categories[0]?.id || '')
   const [price, setPrice] = useState(0)
   const [unit, setUnit] = useState('piece')
   return (
     <div className="page">
-      <h2>Items</h2>
+      <h2>{t('items')}</h2>
       <ul className="simple-list">
         {items.map(i => (
           <li key={i.id}>
             {i.name} – {i.estimatedPrice.toFixed(2)} {i.priceUnit}
             <div className="actions">
               <button onClick={() => {
-                const newName = window.prompt('Rename item', i.name)
+                const newName = window.prompt(t('rename'), i.name)
                 if (newName) onRename(i.id, newName)
-              }}>Rename</button>
-              <button onClick={() => onDelete(i.id)}>Delete</button>
+              }}>{t('rename')}</button>
+              <button onClick={() => onDelete(i.id)}>{t('delete')}</button>
             </div>
           </li>
         ))}
@@ -142,7 +166,7 @@ function ItemsPage({ items, categories, onAdd, onRename, onDelete }) {
         <input
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder="New item"
+          placeholder={t('new_item')}
         />
         <select value={categoryId} onChange={e => setCategoryId(e.target.value)}>
           {categories.map(c => (
@@ -171,29 +195,27 @@ function ItemsPage({ items, categories, onAdd, onRename, onDelete }) {
               setPrice(0)
             }
           }}
-        >
-          Add
-        </button>
+        >{t('add')}</button>
       </div>
     </div>
   )
 }
 
-function CategoriesPage({ categories, onAdd, onRename, onDelete }) {
+function CategoriesPage({ categories, onAdd, onRename, onDelete, t }) {
   const [name, setName] = useState('')
   return (
     <div className="page">
-      <h2>Categories</h2>
+      <h2>{t('categories')}</h2>
       <ul className="simple-list">
         {categories.map(c => (
           <li key={c.id}>
             {c.name}
             <div className="actions">
               <button onClick={() => {
-                const newName = window.prompt('Rename category', c.name)
+                const newName = window.prompt(t('rename'), c.name)
                 if (newName) onRename(c.id, newName)
-              }}>Rename</button>
-              <button onClick={() => onDelete(c.id)}>Delete</button>
+              }}>{t('rename')}</button>
+              <button onClick={() => onDelete(c.id)}>{t('delete')}</button>
             </div>
           </li>
         ))}
@@ -202,7 +224,7 @@ function CategoriesPage({ categories, onAdd, onRename, onDelete }) {
         <input
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder="New category"
+          placeholder={t('new_category')}
         />
         <button
           onClick={() => {
@@ -211,18 +233,16 @@ function CategoriesPage({ categories, onAdd, onRename, onDelete }) {
               setName('')
             }
           }}
-        >
-          Add
-        </button>
+        >{t('add')}</button>
       </div>
     </div>
   )
 }
 
-function ArchivePage({ archived }) {
+function ArchivePage({ archived, t }) {
   return (
     <div className="page">
-      <h2>Archive</h2>
+      <h2>{t('archive')}</h2>
       <ul className="simple-list">
         {archived.map(l => (
           <li key={l.id}>{l.name}</li>
@@ -232,11 +252,11 @@ function ArchivePage({ archived }) {
   )
 }
 
-function SummaryPage({ lists }) {
+function SummaryPage({ lists, t }) {
   let grand = 0
   return (
     <div className="page">
-      <h2>Summary</h2>
+      <h2>{t('summary')}</h2>
       <ul className="simple-list">
         {lists.map(l => {
           const purchased = l.items.filter(i => i.purchased).length
@@ -244,21 +264,28 @@ function SummaryPage({ lists }) {
           grand += total
           return (
             <li key={l.id}>
-              {l.name}: {purchased}/{l.items.length} purchased – {total.toFixed(2)}
+              {l.name}: {purchased}/{l.items.length} – {total.toFixed(2)}
             </li>
           )
         })}
       </ul>
-      <p>Total cost: {grand.toFixed(2)}</p>
+      <p>{t('total_cost') || 'Total'}: {grand.toFixed(2)}</p>
     </div>
   )
 }
 
-function SettingsPage({ onImport, exportData, onClear }) {
+function SettingsPage({ onImport, exportData, onClear, lang, setLang, t }) {
   const [text, setText] = useState('')
   return (
     <div className="page">
-      <h2>Settings</h2>
+      <h2>{t('settings')}</h2>
+      <div style={{ marginBottom: '0.5rem' }}>
+        <label>{t('language')}</label>
+        <select value={lang} onChange={e => setLang(e.target.value)}>
+          <option value="en">English</option>
+          <option value="he">עברית</option>
+        </select>
+      </div>
       <textarea
         value={text}
         onChange={e => setText(e.target.value)}
@@ -281,6 +308,7 @@ function App() {
   const [tab, setTab] = useState('lists')
   const [activeListId, setActiveListId] = useState(null)
   const ignoreSaveRef = useRef(false)
+  const { t, lang, setLang } = useTranslation()
 
   useEffect(() => {
     DataService.loadData().then(d => {
@@ -461,12 +489,12 @@ function App() {
   return (
     <div className="App">
       <nav className="main-nav">
-        <button onClick={() => setTab('lists')}>Lists</button>
-        <button onClick={() => setTab('items')}>Items</button>
-        <button onClick={() => setTab('categories')}>Categories</button>
-        <button onClick={() => setTab('archive')}>Archive</button>
-        <button onClick={() => setTab('summary')}>Summary</button>
-        <button onClick={() => setTab('settings')}>Settings</button>
+        <button onClick={() => setTab('lists')}>{t('lists')}</button>
+        <button onClick={() => setTab('items')}>{t('items')}</button>
+        <button onClick={() => setTab('categories')}>{t('categories')}</button>
+        <button onClick={() => setTab('archive')}>{t('archive')}</button>
+        <button onClick={() => setTab('summary')}>{t('summary')}</button>
+        <button onClick={() => setTab('settings')}>{t('settings')}</button>
       </nav>
       {tab === 'lists' && (
         <ListsPage
@@ -476,6 +504,7 @@ function App() {
           onDelete={deleteList}
           onArchive={archiveList}
           onRename={renameList}
+          t={t}
         />
       )}
       {tab === 'listDetails' && activeListId && (
@@ -486,6 +515,8 @@ function App() {
           onToggleItem={toggleItem}
           onDeleteItem={deleteItem}
           onRenameItem={renameItem}
+          globalItems={data.globalItems}
+          t={t}
         />
       )}
       {tab === 'items' && (
@@ -495,6 +526,7 @@ function App() {
           onAdd={addGlobalItem}
           onRename={renameGlobalItem}
           onDelete={deleteGlobalItem}
+          t={t}
         />
       )}
       {tab === 'categories' && (
@@ -503,12 +535,13 @@ function App() {
           onAdd={addCategory}
           onRename={renameCategory}
           onDelete={deleteCategory}
+          t={t}
         />
       )}
-      {tab === 'archive' && <ArchivePage archived={data.archivedLists} />}
-      {tab === 'summary' && <SummaryPage lists={data.lists} />}
+      {tab === 'archive' && <ArchivePage archived={data.archivedLists} t={t} />}
+      {tab === 'summary' && <SummaryPage lists={data.lists} t={t} />}
       {tab === 'settings' && (
-        <SettingsPage onImport={importData} exportData={exportData} onClear={clearAll} />
+        <SettingsPage onImport={importData} exportData={exportData} onClear={clearAll} lang={lang} setLang={setLang} t={t} />
       )}
     </div>
   )
