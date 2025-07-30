@@ -63,10 +63,12 @@ function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive, onRename, t }) {
   )
 }
 
-function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, onRenameItem, globalItems, t }) {
+function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, onRenameItem, onComplete, readOnly, globalItems, t }) {
   const [itemName, setItemName] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [unit, setUnit] = useState('piece')
+  const [price, setPrice] = useState(0)
+  const [notes, setNotes] = useState('')
   const [filter, setFilter] = useState('')
   const filtered = list.items.filter(it => it.name.toLowerCase().includes(filter.toLowerCase()))
   const suggestions = globalItems.filter(g => g.name.toLowerCase().includes(itemName.toLowerCase())).slice(0,5)
@@ -74,7 +76,7 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
     <div className="page">
       <h2>{list.name}</h2>
       <input
-        placeholder="Search"
+        placeholder={t('search')}
         value={filter}
         onChange={e => setFilter(e.target.value)}
         style={{ marginBottom: '0.5rem' }}
@@ -83,23 +85,30 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
         {filtered.map(it => (
           <li key={it.id}>
             <label>
-              <input
-                type="checkbox"
-                checked={it.purchased}
-                onChange={() => onToggleItem(it.id)}
-              />
+              {!readOnly && (
+                <input
+                  type="checkbox"
+                  checked={it.purchased}
+                  onChange={() => onToggleItem(it.id)}
+                />
+              )}
               {it.name} ({it.quantity} {it.unit})
+              {it.price ? ` - ${t('price')}: ${it.price}` : ''}
+              {it.notes ? ` - ${it.notes}` : ''}
             </label>
-            <div className="actions">
-              <button onClick={() => {
-                const newName = window.prompt(t('rename'), it.name)
-                if (newName) onRenameItem(it.id, newName)
-              }}>{t('rename')}</button>
-              <button onClick={() => onDeleteItem(it.id)}>{t('delete')}</button>
-            </div>
+            {!readOnly && (
+              <div className="actions">
+                <button onClick={() => {
+                  const newName = window.prompt(t('rename'), it.name)
+                  if (newName) onRenameItem(it.id, newName)
+                }}>{t('rename')}</button>
+                <button onClick={() => onDeleteItem(it.id)}>{t('delete')}</button>
+              </div>
+            )}
           </li>
         ))}
       </ul>
+      {!readOnly && (
       <div className="add-form">
         <input
           value={itemName}
@@ -125,17 +134,39 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
           <option value="liter">liter</option>
           <option value="package">package</option>
         </select>
+        <input
+          type="number"
+          style={{ width: '5rem' }}
+          min="0"
+          step="0.01"
+          value={price}
+          onChange={e => setPrice(parseFloat(e.target.value) || 0)}
+          placeholder={t('price')}
+        />
+        <input
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder={t('notes')}
+        />
         <button
           onClick={() => {
             if (itemName.trim()) {
-              onAddItem({ name: itemName.trim(), quantity, unit })
+              onAddItem({ name: itemName.trim(), quantity, unit, price, notes })
               setItemName('')
               setQuantity(1)
+              setPrice(0)
+              setNotes('')
             }
           }}
         >{t('add')}</button>
       </div>
-      <button onClick={onBack}>{t('back')}</button>
+      )}
+      <div style={{ marginTop: '0.5rem' }}>
+        <button onClick={onBack}>{t('back')}</button>
+        {onComplete && !readOnly && (
+          <button onClick={() => onComplete(list.id)} style={{ marginLeft: '0.5rem' }}>{t('complete')}</button>
+        )}
+      </div>
     </div>
   )
 }
@@ -239,13 +270,15 @@ function CategoriesPage({ categories, onAdd, onRename, onDelete, t }) {
   )
 }
 
-function ArchivePage({ archived, t }) {
+function ArchivePage({ archived, onOpen, t }) {
   return (
     <div className="page">
       <h2>{t('archive')}</h2>
       <ul className="simple-list">
         {archived.map(l => (
-          <li key={l.id}>{l.name}</li>
+          <li key={l.id}>
+            <button onClick={() => onOpen(l.id)}>{l.name}</button>
+          </li>
         ))}
       </ul>
     </div>
@@ -307,6 +340,7 @@ function App() {
   const [loaded, setLoaded] = useState(false)
   const [tab, setTab] = useState('lists')
   const [activeListId, setActiveListId] = useState(null)
+  const [activeArchiveId, setActiveArchiveId] = useState(null)
   const ignoreSaveRef = useRef(false)
   const { t, lang, setLang } = useTranslation()
 
@@ -357,6 +391,21 @@ function App() {
     })
   }
 
+  const completeList = id => {
+    setData(d => {
+      const list = d.lists.find(l => l.id === id)
+      if (!list) return d
+      const completed = { ...list, completedAt: new Date().toISOString() }
+      return {
+        ...d,
+        lists: d.lists.filter(l => l.id !== id),
+        archivedLists: [...d.archivedLists, completed]
+      }
+    })
+    setActiveListId(null)
+    setTab('archive')
+  }
+
   const addCategory = name => {
     setData(d => ({ ...d, categories: [...d.categories, { id: 'cat-' + Date.now(), name }] }))
   }
@@ -404,12 +453,22 @@ function App() {
     setTab('listDetails')
   }
 
+  const openArchived = id => {
+    setActiveArchiveId(id)
+    setTab('archiveDetails')
+  }
+
   const closeList = () => {
     setActiveListId(null)
     setTab('lists')
   }
 
-  const addItemToList = ({ name, quantity, unit }) => {
+  const closeArchiveDetails = () => {
+    setActiveArchiveId(null)
+    setTab('archive')
+  }
+
+  const addItemToList = ({ name, quantity, unit, price, notes }) => {
     setData(d => {
       const global = d.globalItems.find(g => g.name.toLowerCase() === name.toLowerCase())
       const item = {
@@ -419,7 +478,8 @@ function App() {
         unit,
         purchased: false,
         categoryId: global ? global.categoryId : d.categories[0]?.id,
-        price: global ? global.estimatedPrice : 0
+        price: price || (global ? global.estimatedPrice : 0),
+        notes: notes || ''
       }
       return {
         ...d,
@@ -515,6 +575,7 @@ function App() {
           onToggleItem={toggleItem}
           onDeleteItem={deleteItem}
           onRenameItem={renameItem}
+          onComplete={completeList}
           globalItems={data.globalItems}
           t={t}
         />
@@ -538,7 +599,22 @@ function App() {
           t={t}
         />
       )}
-      {tab === 'archive' && <ArchivePage archived={data.archivedLists} t={t} />}
+      {tab === 'archive' && (
+        <ArchivePage archived={data.archivedLists} onOpen={openArchived} t={t} />
+      )}
+      {tab === 'archiveDetails' && activeArchiveId && (
+        <ListDetailsPage
+          list={data.archivedLists.find(l => l.id === activeArchiveId) || {id:'',name:'',items:[]}}
+          onBack={closeArchiveDetails}
+          onAddItem={() => {}}
+          onToggleItem={() => {}}
+          onDeleteItem={() => {}}
+          onRenameItem={() => {}}
+          readOnly
+          globalItems={data.globalItems}
+          t={t}
+        />
+      )}
       {tab === 'summary' && <SummaryPage lists={data.lists} t={t} />}
       {tab === 'settings' && (
         <SettingsPage onImport={importData} exportData={exportData} onClear={clearAll} lang={lang} setLang={setLang} t={t} />

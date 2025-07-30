@@ -16,7 +16,12 @@ export const translations = {
     back: 'Back to Lists',
     language: 'Language:',
     new_category: 'New category',
-    total_cost: 'Total'
+    total_cost: 'Total',
+    price: 'Price',
+    notes: 'Notes',
+    search: 'Search',
+    complete: 'Complete',
+    back_archive: 'Back to Archive'
   },
   he: {
     lists: 'רשימות',
@@ -35,6 +40,11 @@ export const translations = {
     back: 'חזרה לרשימות',
     language: 'שפה:',
     new_category: 'קטגוריה חדשה',
-    total_cost: 'סה"כ'
+    total_cost: 'סה"כ',
+    price: 'מחיר',
+    notes: 'הערות',
+    search: 'חיפוש',
+    complete: 'סיום',
+    back_archive: 'חזרה לארכיון'
   }
 }
