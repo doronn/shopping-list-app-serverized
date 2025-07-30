@@ -2,7 +2,14 @@ import { useEffect, useState, useRef } from 'react'
 import DataService from './dataService'
 import './App.css'
 
-const initialData = { lists: [], globalItems: [], categories: [], archivedLists: [], receipts: [] }
+// Provide a basic initial state so the app has one category to choose from
+const initialData = {
+  lists: [],
+  globalItems: [],
+  categories: [{ id: 'cat-1', name: 'General' }],
+  archivedLists: [],
+  receipts: []
+}
 
 function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive, onRename }) {
   const [name, setName] = useState('')
@@ -47,6 +54,8 @@ function ListsPage({ lists, onAdd, onOpen, onDelete, onArchive, onRename }) {
 
 function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, onRenameItem }) {
   const [itemName, setItemName] = useState('')
+  const [quantity, setQuantity] = useState(1)
+  const [unit, setUnit] = useState('piece')
   return (
     <div className="page">
       <h2>{list.name}</h2>
@@ -59,7 +68,7 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
                 checked={it.purchased}
                 onChange={() => onToggleItem(it.id)}
               />
-              {it.name}
+              {it.name} ({it.quantity} {it.unit})
             </label>
             <div className="actions">
               <button onClick={() => {
@@ -77,11 +86,25 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
           onChange={e => setItemName(e.target.value)}
           placeholder="New item"
         />
+        <input
+          type="number"
+          style={{ width: '4rem' }}
+          min="1"
+          value={quantity}
+          onChange={e => setQuantity(parseFloat(e.target.value) || 1)}
+        />
+        <select value={unit} onChange={e => setUnit(e.target.value)}>
+          <option value="piece">piece</option>
+          <option value="kg">kg</option>
+          <option value="liter">liter</option>
+          <option value="package">package</option>
+        </select>
         <button
           onClick={() => {
             if (itemName.trim()) {
-              onAddItem(itemName.trim())
+              onAddItem({ name: itemName.trim(), quantity, unit })
               setItemName('')
+              setQuantity(1)
             }
           }}
         >
@@ -93,15 +116,18 @@ function ListDetailsPage({ list, onBack, onAddItem, onToggleItem, onDeleteItem, 
   )
 }
 
-function ItemsPage({ items, onAdd, onRename, onDelete }) {
+function ItemsPage({ items, categories, onAdd, onRename, onDelete }) {
   const [name, setName] = useState('')
+  const [categoryId, setCategoryId] = useState(categories[0]?.id || '')
+  const [price, setPrice] = useState(0)
+  const [unit, setUnit] = useState('piece')
   return (
     <div className="page">
       <h2>Items</h2>
       <ul className="simple-list">
         {items.map(i => (
           <li key={i.id}>
-            {i.name}
+            {i.name} – {i.estimatedPrice.toFixed(2)} {i.priceUnit}
             <div className="actions">
               <button onClick={() => {
                 const newName = window.prompt('Rename item', i.name)
@@ -118,11 +144,31 @@ function ItemsPage({ items, onAdd, onRename, onDelete }) {
           onChange={e => setName(e.target.value)}
           placeholder="New item"
         />
+        <select value={categoryId} onChange={e => setCategoryId(e.target.value)}>
+          {categories.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <input
+          type="number"
+          style={{ width: '5rem' }}
+          min="0"
+          step="0.01"
+          value={price}
+          onChange={e => setPrice(parseFloat(e.target.value) || 0)}
+        />
+        <select value={unit} onChange={e => setUnit(e.target.value)}>
+          <option value="piece">piece</option>
+          <option value="kg">kg</option>
+          <option value="liter">liter</option>
+          <option value="package">package</option>
+        </select>
         <button
           onClick={() => {
             if (name.trim()) {
-              onAdd(name.trim())
+              onAdd({ name: name.trim(), categoryId, estimatedPrice: price, priceUnit: unit })
               setName('')
+              setPrice(0)
             }
           }}
         >
@@ -187,19 +233,23 @@ function ArchivePage({ archived }) {
 }
 
 function SummaryPage({ lists }) {
+  let grand = 0
   return (
     <div className="page">
       <h2>Summary</h2>
       <ul className="simple-list">
         {lists.map(l => {
           const purchased = l.items.filter(i => i.purchased).length
+          const total = l.items.reduce((sum, it) => sum + it.quantity * it.price, 0)
+          grand += total
           return (
             <li key={l.id}>
-              {l.name}: {purchased}/{l.items.length} purchased
+              {l.name}: {purchased}/{l.items.length} purchased – {total.toFixed(2)}
             </li>
           )
         })}
       </ul>
+      <p>Total cost: {grand.toFixed(2)}</p>
     </div>
   )
 }
@@ -294,8 +344,20 @@ function App() {
     setData(d => ({ ...d, categories: d.categories.filter(c => c.id !== id) }))
   }
 
-  const addGlobalItem = name => {
-    setData(d => ({ ...d, globalItems: [...d.globalItems, { id: 'global-' + Date.now(), name }] }))
+  const addGlobalItem = ({ name, categoryId, estimatedPrice, priceUnit }) => {
+    setData(d => ({
+      ...d,
+      globalItems: [
+        ...d.globalItems,
+        {
+          id: 'global-' + Date.now(),
+          name,
+          categoryId,
+          estimatedPrice,
+          priceUnit
+        }
+      ]
+    }))
   }
 
   const renameGlobalItem = (id, name) => {
@@ -319,15 +381,25 @@ function App() {
     setTab('lists')
   }
 
-  const addItemToList = name => {
-    setData(d => ({
-      ...d,
-      lists: d.lists.map(l =>
-        l.id === activeListId
-          ? { ...l, items: [...l.items, { id: 'item-' + Date.now(), name, purchased: false }] }
-          : l
-      )
-    }))
+  const addItemToList = ({ name, quantity, unit }) => {
+    setData(d => {
+      const global = d.globalItems.find(g => g.name.toLowerCase() === name.toLowerCase())
+      const item = {
+        id: 'item-' + Date.now(),
+        name,
+        quantity,
+        unit,
+        purchased: false,
+        categoryId: global ? global.categoryId : d.categories[0]?.id,
+        price: global ? global.estimatedPrice : 0
+      }
+      return {
+        ...d,
+        lists: d.lists.map(l =>
+          l.id === activeListId ? { ...l, items: [...l.items, item] } : l
+        )
+      }
+    })
   }
 
   const renameItem = (itemId, name) => {
@@ -419,6 +491,7 @@ function App() {
       {tab === 'items' && (
         <ItemsPage
           items={data.globalItems}
+          categories={data.categories}
           onAdd={addGlobalItem}
           onRename={renameGlobalItem}
           onDelete={deleteGlobalItem}
