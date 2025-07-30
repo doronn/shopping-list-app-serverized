@@ -7,8 +7,8 @@ import { io } from 'socket.io-client'
 const STORAGE_KEY = 'shoppingListData';
 
 /*
- * DataService provides an abstraction layer over data persistence.  In phase 1
- * we store everything in localStorage.  To prepare for phase 2 (server
+ * DataService provides an abstraction layer over data persistence.  In phase 1
+ * we store everything in localStorage.  To prepare for phase 2 (server
  * synchronisation), DataService exposes a `useServer` flag and a
  * `serverBaseUrl` property.  When `useServer` is set to true, all
  * operations will be proxied to a remote API rather than localStorage.  The

@@ -46,8 +46,9 @@ const io = new Server(server, { cors: { origin: '*' } });
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
-// Serve the static front‑end files (index.html, script.js, etc.)
-app.use(express.static(path.join(__dirname, '..', 'shopping-list-app')));
+// Serve the built React frontend
+const staticDir = path.join(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(staticDir));
 
 // REST endpoint: GET /data – return the entire app state
 app.get('/data', (req, res) => {
@@ -85,6 +86,11 @@ app.post('/data/clear', (req, res) => {
 // WebSocket connection: send current data on connection
 io.on('connection', socket => {
   socket.emit('dataUpdated', appData);
+});
+
+// Send index.html for any other routes so that React Router works
+app.get('*', (req, res) => {
+  res.sendFile(path.join(staticDir, 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
