@@ -1,14 +1,12 @@
-const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const { init: initDb, loadData, saveData } = require('./db');
 
-// Simple in‑memory storage for the shopping list data.  On startup we
-// initialise from a JSON file if it exists.  In a production system you
-// might replace this with a database.
-const DATA_FILE = path.join(__dirname, 'data.json');
+// Simple in-memory storage for the shopping list data. The data is
+// persisted in a SQLite database via db.js.
 let appData = {
   lists: [],
   globalItems: [],
@@ -17,31 +15,11 @@ let appData = {
   receipts: []
 };
 
-function loadDataFromDisk() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-      appData = JSON.parse(raw);
-    }
-  } catch (err) {
-    console.error('Failed to load data file', err);
-  }
-}
-
-function saveDataToDisk() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(appData, null, 2));
-  } catch (err) {
-    console.error('Failed to save data file', err);
-  }
-}
-
-// Initialise data on startup
-loadDataFromDisk();
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
+
+initDb();
 
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
@@ -55,21 +33,21 @@ app.get('/data', (req, res) => {
 });
 
 // REST endpoint: PUT /data – replace the entire app state
-app.put('/data', (req, res) => {
+app.put('/data', async (req, res) => {
   const newData = req.body;
   if (!newData || typeof newData !== 'object') {
     res.status(400).json({ message: 'Invalid data' });
     return;
   }
   appData = newData;
-  saveDataToDisk();
+  await saveData(appData);
   // Broadcast to all connected clients that data has changed
   io.emit('dataUpdated', appData);
   res.json({ message: 'Data updated' });
 });
 
 // REST endpoint: POST /data/clear – reset app state
-app.post('/data/clear', (req, res) => {
+app.post('/data/clear', async (req, res) => {
   appData = {
     lists: [],
     globalItems: [],
@@ -77,7 +55,7 @@ app.post('/data/clear', (req, res) => {
     archivedLists: [],
     receipts: []
   };
-  saveDataToDisk();
+  await saveData(appData);
   io.emit('dataUpdated', appData);
   res.json({ message: 'Data cleared' });
 });
@@ -88,6 +66,17 @@ io.on('connection', socket => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Shopping List server running on http://localhost:${PORT}`);
-});
+
+loadData()
+  .then(d => {
+    appData = d;
+    server.listen(PORT, () => {
+      console.log(`Shopping List server running on http://localhost:${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('Failed to load data from database', err);
+    server.listen(PORT, () => {
+      console.log(`Shopping List server running on http://localhost:${PORT}`);
+    });
+  });
