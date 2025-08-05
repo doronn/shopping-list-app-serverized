@@ -2,11 +2,10 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
-const { Server } = require('socket.io');
-const { init: initDb, loadData, saveData } = require('./db');
+const { init, loadData, saveData } = require('./db');
 
 // Simple in-memory storage for the shopping list data. The data is
-// persisted in a SQLite database via db.js.
+// persisted in Firestore via db.js.
 let appData = {
   lists: [],
   globalItems: [],
@@ -19,7 +18,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-initDb();
+init();
 
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
