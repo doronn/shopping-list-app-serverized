@@ -317,7 +317,10 @@ function applyLanguage() {
         clearBtn.innerText = t.clear_data;
     }
     document.getElementById('lists-title').innerText = t.lists_title;
-    document.getElementById('add-list-button').innerText = t.add_list;
+    const addListBtn = document.getElementById('add-list-button');
+    addListBtn.textContent = '➕';
+    addListBtn.title = t.add_list;
+    addListBtn.classList.add('icon-btn');
     document.getElementById('summary-title').innerText = t.summary_title;
     document.getElementById('items-title').innerText = t.items_title;
     document.getElementById('archive-title').innerText = t.archive_title;
@@ -339,13 +342,20 @@ function applyLanguage() {
         document.getElementById('global-unit-label').innerText = t.global_unit;
         document.getElementById('save-global-item').innerText = t.save;
         document.getElementById('cancel-global-item-modal').innerText = t.cancel;
-        document.getElementById('add-global-item-button').innerText = t.add_global_item;
+        const addGlobalBtn = document.getElementById('add-global-item-button');
+        addGlobalBtn.textContent = '➕';
+        addGlobalBtn.title = t.add_global_item;
+        addGlobalBtn.classList.add('icon-btn');
     }
     // Categories section
     const categoriesTitleEl = document.getElementById('categories-title');
     if (categoriesTitleEl) categoriesTitleEl.innerText = t.categories_title;
     const addCategoryBtn = document.getElementById('add-category-button');
-    if (addCategoryBtn) addCategoryBtn.innerText = t.add_category;
+    if (addCategoryBtn) {
+        addCategoryBtn.textContent = '➕';
+        addCategoryBtn.title = t.add_category;
+        addCategoryBtn.classList.add('icon-btn');
+    }
     // Render categories names to update language
     renderCategories();
     // Modal texts
@@ -365,12 +375,26 @@ function applyLanguage() {
     if (priceBasisLabel) priceBasisLabel.innerText = t.item_price_basis;
     document.getElementById('save-item').innerText = t.save;
     document.getElementById('cancel-item-modal').innerText = t.cancel;
-    document.getElementById('add-item-button').innerText = t.add_item;
+    const addItemBtn = document.getElementById('add-item-button');
+    addItemBtn.textContent = '➕';
+    addItemBtn.title = t.add_item;
+    addItemBtn.classList.add('icon-btn');
     const completeBtn = document.getElementById('complete-list-button');
-    if (completeBtn) completeBtn.innerText = t.complete_list;
-    document.getElementById('close-list-details').innerText = t.close;
+    if (completeBtn) {
+        completeBtn.textContent = '✅';
+        completeBtn.title = t.complete_list;
+        completeBtn.classList.add('icon-btn');
+    }
+    const closeBtn = document.getElementById('close-list-details');
+    closeBtn.textContent = '✖';
+    closeBtn.title = t.close;
+    closeBtn.classList.add('icon-btn');
     const fsBtn = document.getElementById('toggle-fullscreen');
-    if (fsBtn) fsBtn.innerText = listFullscreen ? t.restore : t.maximize;
+    if (fsBtn) {
+        fsBtn.textContent = listFullscreen ? '🗗' : '⛶';
+        fsBtn.title = listFullscreen ? t.restore : t.maximize;
+        fsBtn.classList.add('icon-btn');
+    }
     const checkedHeading = document.getElementById('checked-heading');
     if (checkedHeading) checkedHeading.innerText = t.purchased;
     // Populate categories select for list items using data.categories
@@ -430,17 +454,23 @@ function renderLists() {
         li.appendChild(info);
         // Manage Items button
         const manageBtn = document.createElement('button');
-        manageBtn.textContent = t.manage_items;
+        manageBtn.className = 'icon-btn';
+        manageBtn.textContent = '📋';
+        manageBtn.title = t.manage_items;
         manageBtn.addEventListener('click', () => openListDetails(list.id));
         li.appendChild(manageBtn);
         // Rename button
         const renameBtn = document.createElement('button');
-        renameBtn.textContent = t.rename_list;
+        renameBtn.className = 'icon-btn';
+        renameBtn.textContent = '✏️';
+        renameBtn.title = t.rename_list;
         renameBtn.addEventListener('click', () => openListModal(list.id));
         li.appendChild(renameBtn);
         // Share link button
         const linkBtn = document.createElement('button');
-        linkBtn.textContent = t.share_link;
+        linkBtn.className = 'icon-btn';
+        linkBtn.textContent = '🔗';
+        linkBtn.title = t.share_link;
         linkBtn.addEventListener('click', () => {
             const url = new URL(window.location);
             url.searchParams.set('list', list.id);
@@ -450,7 +480,9 @@ function renderLists() {
         li.appendChild(linkBtn);
         // Delete button
         const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = t.delete_list;
+        deleteBtn.className = 'icon-btn';
+        deleteBtn.textContent = '🗑️';
+        deleteBtn.title = t.delete_list;
         deleteBtn.addEventListener('click', () => {
             if (confirm('Delete list?')) {
                 data.lists = data.lists.filter(l => l.id !== list.id);
@@ -523,7 +555,9 @@ function renderSummary() {
         // Button to create new list with missing items
         if (itemsMissing.length > 0) {
             const createBtn = document.createElement('button');
-            createBtn.textContent = t.create_from_missing;
+            createBtn.className = 'icon-btn';
+            createBtn.textContent = '➕';
+            createBtn.title = t.create_from_missing;
             createBtn.addEventListener('click', () => {
                 const newList = {
                     id: 'list-' + Date.now(),
@@ -579,12 +613,16 @@ function renderGlobalItems() {
         li.appendChild(info);
         // Edit button
         const editBtn = document.createElement('button');
-        editBtn.textContent = t.edit_global_item;
+        editBtn.className = 'icon-btn';
+        editBtn.textContent = '✏️';
+        editBtn.title = t.edit_global_item;
         editBtn.addEventListener('click', () => openGlobalItemModal(item.id));
         li.appendChild(editBtn);
         // Delete button
         const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = t.delete_list;
+        deleteBtn.className = 'icon-btn';
+        deleteBtn.textContent = '🗑️';
+        deleteBtn.title = t.delete_list;
         deleteBtn.addEventListener('click', () => {
             if (confirm('Delete global item?')) {
                 data.globalItems = data.globalItems.filter(g => g.id !== item.id);
@@ -827,6 +865,7 @@ function renderItems(list) {
             const heading = document.createElement('div');
             heading.className = 'category-heading';
             const collapseBtn = document.createElement('button');
+            collapseBtn.className = 'icon-btn';
             collapseBtn.textContent = collapsedCategories[catId] ? '▶' : '▼';
             collapseBtn.addEventListener('click', () => {
                 collapsedCategories[catId] = !collapsedCategories[catId];
@@ -845,10 +884,12 @@ function renderItems(list) {
             });
             heading.appendChild(checkBox);
             const upBtn = document.createElement('button');
+            upBtn.className = 'icon-btn';
             upBtn.textContent = '↑';
             upBtn.addEventListener('click', () => moveCategory(catId, -1, list));
             heading.appendChild(upBtn);
             const downBtn = document.createElement('button');
+            downBtn.className = 'icon-btn';
             downBtn.textContent = '↓';
             downBtn.addEventListener('click', () => moveCategory(catId, 1, list));
             heading.appendChild(downBtn);
@@ -896,19 +937,25 @@ function renderItems(list) {
                     info.textContent = text;
                     li.appendChild(info);
                     const up = document.createElement('button');
+                    up.className = 'icon-btn';
                     up.textContent = '↑';
                     up.addEventListener('click', () => moveItem(list, item.id, -1));
                     li.appendChild(up);
                     const down = document.createElement('button');
+                    down.className = 'icon-btn';
                     down.textContent = '↓';
                     down.addEventListener('click', () => moveItem(list, item.id, 1));
                     li.appendChild(down);
                     const editBtn = document.createElement('button');
-                    editBtn.textContent = t.rename_list;
+                    editBtn.className = 'icon-btn';
+                    editBtn.textContent = '✏️';
+                    editBtn.title = t.rename_list;
                     editBtn.addEventListener('click', () => openItemModal(list.id, item.id));
                     li.appendChild(editBtn);
                     const deleteBtn = document.createElement('button');
-                    deleteBtn.textContent = t.delete_list;
+                    deleteBtn.className = 'icon-btn';
+                    deleteBtn.textContent = '🗑️';
+                    deleteBtn.title = t.delete_list;
                     deleteBtn.addEventListener('click', () => {
                         const index = list.items.findIndex(i => i.id === item.id);
                         if (index >= 0) {
@@ -1350,7 +1397,9 @@ function renderArchive() {
         }
         // View button to open archived list details for editing
         const viewBtn = document.createElement('button');
-        viewBtn.textContent = t.archive_view;
+        viewBtn.className = 'icon-btn';
+        viewBtn.textContent = '👁️';
+        viewBtn.title = t.archive_view;
         viewBtn.addEventListener('click', () => {
             openListDetails(list.id, true);
         });
@@ -1375,7 +1424,9 @@ function renderCategories() {
         li.appendChild(nameSpan);
         // Edit button for categories (rename names)
         const renameBtn = document.createElement('button');
-        renameBtn.textContent = translations[currentLanguage].rename_list;
+        renameBtn.className = 'icon-btn';
+        renameBtn.textContent = '✏️';
+        renameBtn.title = translations[currentLanguage].rename_list;
         renameBtn.addEventListener('click', () => {
             // Prompt for new names in both languages
             const newNameEn = prompt('New category name (English)', cat.names.en || '');
@@ -1392,7 +1443,9 @@ function renderCategories() {
         // Delete button for custom categories (not default ones)
         if (!cat.id.startsWith('produce') && !cat.id.startsWith('dairy') && !cat.id.startsWith('meat') && !cat.id.startsWith('bakery') && !cat.id.startsWith('beverages') && cat.id !== 'other') {
             const delBtn = document.createElement('button');
-            delBtn.textContent = translations[currentLanguage].delete_list;
+            delBtn.className = 'icon-btn';
+            delBtn.textContent = '🗑️';
+            delBtn.title = translations[currentLanguage].delete_list;
             delBtn.addEventListener('click', () => {
                 if (confirm('Delete category?')) {
                     // Remove category from data.categories

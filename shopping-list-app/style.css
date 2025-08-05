@@ -31,6 +31,17 @@ button:disabled {
     cursor: default;
 }
 
+/* Compact square buttons for icon-only controls */
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    font-size: 1.2rem;
+}
+
 header {
     display: flex;
     justify-content: space-between;
@@ -187,12 +198,22 @@ nav button.active {
     align-items: stretch;
 }
 
+#list-details {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#items-scroll {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
 #list-details ul {
     list-style-type: none;
     padding: 0;
     margin: 0;
-    max-height: 300px;
-    overflow-y: auto;
 }
 
 #list-details li {
