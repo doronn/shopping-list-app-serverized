@@ -73,7 +73,12 @@ const translations = {
         add_category: "Add Category"
         ,
         clear_data: "Clear All Data",
-        confirm_clear: "Are you sure you want to clear all data? This cannot be undone."
+        confirm_clear: "Are you sure you want to clear all data? This cannot be undone.",
+        share_link: "Copy Link",
+        maximize: "Maximize",
+        restore: "Restore",
+        check_all: "Check All",
+        uncheck_all: "Uncheck All"
     },
     he: {
         app_title: "רשימת קניות",
@@ -145,7 +150,12 @@ const translations = {
         add_category: "הוסף קטגוריה"
         ,
         clear_data: "נקה את כל הנתונים",
-        confirm_clear: "האם אתה בטוח שברצונך לנקות את כל הנתונים? פעולה זו לא ניתנת לביטול."
+        confirm_clear: "האם אתה בטוח שברצונך לנקות את כל הנתונים? פעולה זו לא ניתנת לביטול.",
+        share_link: "העתק קישור",
+        maximize: "מסך מלא",
+        restore: "יציאה ממסך מלא",
+        check_all: "סמן הכל",
+        uncheck_all: "בטל סימון הכל"
     }
 };
 
@@ -166,6 +176,8 @@ let itemSearchTerm = '';
 let editingGlobalItemId = null;
 let editingArchive = false;
 const isMobile = /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.test(navigator.userAgent);
+let collapsedCategories = JSON.parse(localStorage.getItem('collapsedCategories') || '{}');
+let listFullscreen = localStorage.getItem('listFullscreen') === 'true';
 
 // Update datalist options for global item suggestions
 function updateGlobalItemSuggestions() {
@@ -357,6 +369,10 @@ function applyLanguage() {
     const completeBtn = document.getElementById('complete-list-button');
     if (completeBtn) completeBtn.innerText = t.complete_list;
     document.getElementById('close-list-details').innerText = t.close;
+    const fsBtn = document.getElementById('toggle-fullscreen');
+    if (fsBtn) fsBtn.innerText = listFullscreen ? t.restore : t.maximize;
+    const checkedHeading = document.getElementById('checked-heading');
+    if (checkedHeading) checkedHeading.innerText = t.purchased;
     // Populate categories select for list items using data.categories
     const select = document.getElementById('item-category-select');
     if (select) {
@@ -422,6 +438,16 @@ function renderLists() {
         renameBtn.textContent = t.rename_list;
         renameBtn.addEventListener('click', () => openListModal(list.id));
         li.appendChild(renameBtn);
+        // Share link button
+        const linkBtn = document.createElement('button');
+        linkBtn.textContent = t.share_link;
+        linkBtn.addEventListener('click', () => {
+            const url = new URL(window.location);
+            url.searchParams.set('list', list.id);
+            navigator.clipboard.writeText(url.toString());
+            alert(t.share_link);
+        });
+        li.appendChild(linkBtn);
         // Delete button
         const deleteBtn = document.createElement('button');
         deleteBtn.textContent = t.delete_list;
@@ -700,117 +726,211 @@ function openListDetails(listId, isArchive = false) {
         renderItems(list);
     }
     overlay.classList.remove('hidden');
+    const url = new URL(window.location);
+    url.searchParams.set('list', listId);
+    history.replaceState(null, '', url);
+    applyFullscreenState();
 }
 
 function closeListDetails() {
-    document.getElementById('list-details-overlay').classList.add('hidden');
+    const overlay = document.getElementById('list-details-overlay');
+    overlay.classList.add('hidden');
+    const url = new URL(window.location);
+    url.searchParams.delete('list');
+    history.replaceState(null, '', url);
+}
+function applyFullscreenState() {
+    const overlay = document.getElementById('list-details-overlay');
+    const modal = document.getElementById('list-details');
+    const btn = document.getElementById('toggle-fullscreen');
+    if (listFullscreen) {
+        overlay.classList.add('fullscreen');
+        modal.classList.add('fullscreen');
+        if (btn) btn.innerText = translations[currentLanguage].restore;
+    } else {
+        overlay.classList.remove('fullscreen');
+        modal.classList.remove('fullscreen');
+        if (btn) btn.innerText = translations[currentLanguage].maximize;
+    }
+}
+
+function toggleListFullscreen() {
+    listFullscreen = !listFullscreen;
+    localStorage.setItem('listFullscreen', listFullscreen);
+    applyFullscreenState();
+}
+
+function getItemCategory(item) {
+    const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+    return globalItem ? globalItem.categoryId : (item.categoryId || 'other');
+}
+
+function moveCategory(catId, dir, list) {
+    const idx = data.categories.findIndex(c => c.id === catId);
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= data.categories.length) return;
+    const [cat] = data.categories.splice(idx, 1);
+    data.categories.splice(newIdx, 0, cat);
+    saveData();
+    renderCategories();
+    renderItems(list);
+}
+
+function moveItem(list, itemId, dir) {
+    const idx = list.items.findIndex(i => i.id === itemId);
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= list.items.length) return;
+    const [it] = list.items.splice(idx, 1);
+    list.items.splice(newIdx, 0, it);
+    saveData();
+    renderItems(list);
+}
+
+function setCategoryChecked(list, catId, checked) {
+    list.items.forEach(it => {
+        if (getItemCategory(it) === catId) {
+            it.isChecked = checked;
+        }
+    });
+    saveData();
+    renderItems(list);
+    renderLists();
+    renderSummary();
 }
 
 // Render items of current list
 function renderItems(list) {
     const container = document.getElementById('items-container');
+    const checkedContainer = document.getElementById('checked-items-container');
     container.innerHTML = '';
+    checkedContainer.innerHTML = '';
     const t = translations[currentLanguage];
-    // Filter items by search term (case-insensitive)
     const term = itemSearchTerm.toLowerCase();
-    // Group items by their global item's category ID
     const groups = {};
     list.items.filter(item => {
-        // Filter by global item name instead of local name
         const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
         const itemName = globalItem ? globalItem.name : item.name;
         return !term || (itemName && itemName.toLowerCase().includes(term));
     }).forEach(item => {
-        const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-        const cid = globalItem ? globalItem.categoryId : (item.categoryId || 'other');
+        const cid = getItemCategory(item);
         if (!groups[cid]) groups[cid] = [];
         groups[cid].push(item);
     });
-    // Sort categories by name for display
-    const sortedCatIds = Object.keys(groups).sort((a, b) => {
-        const catA = data.categories.find(c => c.id === a);
-        const catB = data.categories.find(c => c.id === b);
-        const nameA = catA ? (catA.names[currentLanguage] || catA.names.en || catA.names.he || catA.id) : a;
-        const nameB = catB ? (catB.names[currentLanguage] || catB.names.en || catB.names.he || catB.id) : b;
-        return nameA.localeCompare(nameB);
-    });
-    sortedCatIds.forEach(catId => {
-        const cat = data.categories.find(c => c.id === catId);
-        const catName = cat ? (cat.names[currentLanguage] || cat.names.en || cat.names.he || cat.id) : catId;
-        // Category heading
-        const heading = document.createElement('div');
-        heading.className = 'category-heading';
-        heading.textContent = catName;
-        container.appendChild(heading);
-        // Items under this category
-        groups[catId].forEach(item => {
-            const li = document.createElement('li');
-            // Checkbox for purchased
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.checked = item.isChecked;
-            checkbox.addEventListener('change', async () => {
-                item.isChecked = checkbox.checked;
-                await saveData();
+    data.categories.forEach(cat => {
+        const catId = cat.id;
+        const items = groups[catId] || [];
+        if (items.length === 0) return;
+        const catName = cat.names[currentLanguage] || cat.names.en || cat.names.he || cat.id;
+        const unchecked = items.filter(i => !i.isChecked);
+        const checked = items.filter(i => i.isChecked);
+        const renderSection = (target, arr) => {
+            const heading = document.createElement('div');
+            heading.className = 'category-heading';
+            const collapseBtn = document.createElement('button');
+            collapseBtn.textContent = collapsedCategories[catId] ? '▶' : '▼';
+            collapseBtn.addEventListener('click', () => {
+                collapsedCategories[catId] = !collapsedCategories[catId];
+                localStorage.setItem('collapsedCategories', JSON.stringify(collapsedCategories));
                 renderItems(list);
-                renderLists();
-                renderSummary();
             });
-            li.appendChild(checkbox);
-            // Item info
-            const info = document.createElement('span');
-            info.style.flex = '1';
-            info.style.marginLeft = '0.5rem';
-            info.style.textDecoration = item.isChecked ? 'line-through' : 'none';
-            const currency = document.getElementById('default-currency').value || '';
-            // Find global item for display
-            const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-            const itemName = globalItem ? globalItem.name : item.name;
-            const unit = item.quantityUnit || '';
-            // Pricing and total calculation with basis quantity and units
-            const priceVal = item.actualPrice != null ? item.actualPrice : (globalItem ? globalItem.estimatedPrice : 0);
-            const basis = item.priceBasisQuantity || 1;
-            const priceUnit = item.actualPrice != null ? item.quantityUnit : (globalItem ? globalItem.priceUnit : item.quantityUnit);
-            // Compute total cost only when unit matches for estimated price or always for actual price
-            let totalCost = null;
-            if (item.actualPrice != null) {
-                totalCost = priceVal * (item.quantity / basis);
-            } else if (globalItem && globalItem.priceUnit === item.quantityUnit) {
-                totalCost = priceVal * (item.quantity / basis);
-            }
-            const quantityDisplay = `${item.quantity}${unit ? ' ' + unit : ''}`;
-            let priceDisplay = `${currency}${priceVal.toFixed(2)}`;
-            if (basis !== 1) priceDisplay += ` / ${basis}`;
-            if (priceUnit) priceDisplay += ` ${priceUnit}`;
-            let text = `${itemName} (${quantityDisplay})`;
-            text += `, ${priceDisplay}`;
-            if (totalCost != null) {
-                text += ` × ${item.quantity} = ${currency}${totalCost.toFixed(2)}`;
-            }
-            info.textContent = text;
-            li.appendChild(info);
-            // Edit button
-            const editBtn = document.createElement('button');
-            editBtn.textContent = t.rename_list;
-            editBtn.addEventListener('click', () => openItemModal(list.id, item.id));
-            li.appendChild(editBtn);
-            // Delete button
-            const deleteBtn = document.createElement('button');
-            deleteBtn.textContent = t.delete_list;
-            deleteBtn.addEventListener('click', () => {
-                const index = list.items.findIndex(i => i.id === item.id);
-                if (index >= 0) {
-                    list.items.splice(index, 1);
-                    saveData();
-                    renderItems(list);
-                    renderLists();
-                    renderSummary();
-                }
+            heading.appendChild(collapseBtn);
+            const span = document.createElement('span');
+            span.textContent = catName;
+            heading.appendChild(span);
+            const checkBox = document.createElement('input');
+            checkBox.type = 'checkbox';
+            checkBox.checked = arr.length > 0 && arr.every(i => i.isChecked);
+            checkBox.addEventListener('change', () => {
+                setCategoryChecked(list, catId, checkBox.checked);
             });
-            li.appendChild(deleteBtn);
-            container.appendChild(li);
-        });
+            heading.appendChild(checkBox);
+            const upBtn = document.createElement('button');
+            upBtn.textContent = '↑';
+            upBtn.addEventListener('click', () => moveCategory(catId, -1, list));
+            heading.appendChild(upBtn);
+            const downBtn = document.createElement('button');
+            downBtn.textContent = '↓';
+            downBtn.addEventListener('click', () => moveCategory(catId, 1, list));
+            heading.appendChild(downBtn);
+            target.appendChild(heading);
+            if (!collapsedCategories[catId]) {
+                arr.forEach(item => {
+                    const li = document.createElement('li');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.checked = item.isChecked;
+                    checkbox.addEventListener('change', async () => {
+                        item.isChecked = checkbox.checked;
+                        await saveData();
+                        renderItems(list);
+                        renderLists();
+                        renderSummary();
+                    });
+                    li.appendChild(checkbox);
+                    const info = document.createElement('span');
+                    info.style.flex = '1';
+                    info.style.marginLeft = '0.5rem';
+                    info.style.textDecoration = item.isChecked ? 'line-through' : 'none';
+                    const currency = document.getElementById('default-currency').value || '';
+                    const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+                    const itemName = globalItem ? globalItem.name : item.name;
+                    const unit = item.quantityUnit || '';
+                    const priceVal = item.actualPrice != null ? item.actualPrice : (globalItem ? globalItem.estimatedPrice : 0);
+                    const basis = item.priceBasisQuantity || 1;
+                    const priceUnit = item.actualPrice != null ? item.quantityUnit : (globalItem ? globalItem.priceUnit : item.quantityUnit);
+                    let totalCost = null;
+                    if (item.actualPrice != null) {
+                        totalCost = priceVal * (item.quantity / basis);
+                    } else if (globalItem && globalItem.priceUnit === item.quantityUnit) {
+                        totalCost = priceVal * (item.quantity / basis);
+                    }
+                    const quantityDisplay = `${item.quantity}${unit ? ' ' + unit : ''}`;
+                    let priceDisplay = `${currency}${priceVal.toFixed(2)}`;
+                    if (basis !== 1) priceDisplay += ` / ${basis}`;
+                    if (priceUnit) priceDisplay += ` ${priceUnit}`;
+                    let text = `${itemName} (${quantityDisplay})`;
+                    text += `, ${priceDisplay}`;
+                    if (totalCost != null) {
+                        text += ` × ${item.quantity} = ${currency}${totalCost.toFixed(2)}`;
+                    }
+                    info.textContent = text;
+                    li.appendChild(info);
+                    const up = document.createElement('button');
+                    up.textContent = '↑';
+                    up.addEventListener('click', () => moveItem(list, item.id, -1));
+                    li.appendChild(up);
+                    const down = document.createElement('button');
+                    down.textContent = '↓';
+                    down.addEventListener('click', () => moveItem(list, item.id, 1));
+                    li.appendChild(down);
+                    const editBtn = document.createElement('button');
+                    editBtn.textContent = t.rename_list;
+                    editBtn.addEventListener('click', () => openItemModal(list.id, item.id));
+                    li.appendChild(editBtn);
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.textContent = t.delete_list;
+                    deleteBtn.addEventListener('click', () => {
+                        const index = list.items.findIndex(i => i.id === item.id);
+                        if (index >= 0) {
+                            list.items.splice(index, 1);
+                            saveData();
+                            renderItems(list);
+                            renderLists();
+                            renderSummary();
+                        }
+                    });
+                    li.appendChild(deleteBtn);
+                    target.appendChild(li);
+                });
+            }
+        };
+        if (unchecked.length > 0) renderSection(container, unchecked);
+        if (checked.length > 0) renderSection(checkedContainer, checked);
     });
+    const hasChecked = checkedContainer.children.length > 0;
+    checkedContainer.style.display = hasChecked ? '' : 'none';
+    const headingEl = document.getElementById('checked-heading');
+    if (headingEl) headingEl.style.display = hasChecked ? '' : 'none';
 }
 
 // Open modal to create or edit an item
@@ -987,6 +1107,8 @@ function setupEvents() {
     document.getElementById('cancel-modal').addEventListener('click', closeListModal);
     document.getElementById('add-item-button').addEventListener('click', () => openItemModal(editingItemListId));
     document.getElementById('close-list-details').addEventListener('click', closeListDetails);
+    const fsBtn = document.getElementById('toggle-fullscreen');
+    if (fsBtn) fsBtn.addEventListener('click', toggleListFullscreen);
     const completeBtn = document.getElementById('complete-list-button');
     if (completeBtn) {
         completeBtn.addEventListener('click', () => {
@@ -1136,6 +1258,12 @@ async function init() {
     // connection and call onRemoteDataUpdated() whenever data is updated.
     if (window.DataService && window.DataService.useServer) {
         window.DataService.initSocket();
+    }
+    const params = new URLSearchParams(window.location.search);
+    const linked = params.get('list');
+    if (linked) {
+        showPage('lists');
+        openListDetails(linked);
     }
 }
 

@@ -27,6 +27,10 @@ When the frontend loads it attempts to use the backend via `DataService`. If the
 ## Features
 
 - Manage multiple shopping lists and a global catalogue of items.
+- Direct links (`?list=<id>`) open a specific list immediately.
+- List details can be toggled to full screen and this preference is saved locally.
+- Items and categories are reorderable; categories may be collapsed or checked in bulk.
+- Checked items appear in a dedicated section at the bottom of each list.
 - English and Hebrew translations with right‑to‑left support.
 - Optional import/export tools and receipt upload UI.
 - Real‑time synchronisation between browser tabs when connected to the server.
