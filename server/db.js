@@ -15,10 +15,24 @@ async function loadCollection(name) {
   return snapshot.docs.map(doc => doc.data());
 }
 
-async function clearCollection(name) {
-  const snapshot = await db.collection(name).get();
+// Replace the entire collection in a single batch so snapshot listeners
+// don't observe a momentary empty state during updates.
+async function saveCollection(name, items) {
+  const coll = db.collection(name);
+  const snapshot = await coll.get();
   const batch = db.batch();
-  snapshot.docs.forEach(doc => batch.delete(doc.ref));
+  const newIds = new Set(items.map(i => i.id));
+
+  snapshot.docs.forEach(doc => {
+    if (!newIds.has(doc.id)) {
+      batch.delete(doc.ref);
+    }
+  });
+
+  items.forEach(item => {
+    batch.set(coll.doc(item.id), item);
+  });
+
   await batch.commit();
 }
 
@@ -33,32 +47,41 @@ async function loadData() {
 }
 
 async function saveData(data) {
-  // Clear existing documents
   await Promise.all([
-    clearCollection('lists'),
-    clearCollection('items'),
-    clearCollection('categories'),
-    clearCollection('archivedLists'),
-    clearCollection('receipts')
+    saveCollection('lists', data.lists),
+    saveCollection('items', data.globalItems),
+    saveCollection('categories', data.categories),
+    saveCollection('archivedLists', data.archivedLists),
+    saveCollection('receipts', data.receipts)
   ]);
-
-  const batch = db.batch();
-  data.lists.forEach(item =>
-    batch.set(db.collection('lists').doc(item.id), item)
-  );
-  data.globalItems.forEach(item =>
-    batch.set(db.collection('items').doc(item.id), item)
-  );
-  data.categories.forEach(item =>
-    batch.set(db.collection('categories').doc(item.id), item)
-  );
-  data.archivedLists.forEach(item =>
-    batch.set(db.collection('archivedLists').doc(item.id), item)
-  );
-  data.receipts.forEach(item =>
-    batch.set(db.collection('receipts').doc(item.id), item)
-  );
-  await batch.commit();
 }
 
-module.exports = { init, loadData, saveData };
+function watchCollection(collection, key, onChange) {
+  return db.collection(collection).onSnapshot(snapshot => {
+    const items = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (!data || typeof data !== 'object' || data.id !== doc.id) {
+        console.error(`Corrupted document in ${collection}: ${doc.id}`);
+        return;
+      }
+      items.push(data);
+    });
+    onChange(key, items);
+  }, err => {
+    console.error(`Listener error for ${collection}`, err);
+  });
+}
+
+function watchData(onChange) {
+  const unsubscribers = [
+    watchCollection('lists', 'lists', onChange),
+    watchCollection('items', 'globalItems', onChange),
+    watchCollection('categories', 'categories', onChange),
+    watchCollection('archivedLists', 'archivedLists', onChange),
+    watchCollection('receipts', 'receipts', onChange)
+  ];
+  return () => unsubscribers.forEach(unsub => unsub());
+}
+
+module.exports = { init, loadData, saveData, watchData };

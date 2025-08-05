@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
-const { init, loadData, saveData } = require('./db');
+const { init, loadData, saveData, watchData } = require('./db');
 
 // Simple in-memory storage for the shopping list data. The data is
 // persisted in Firestore via db.js.
@@ -67,15 +67,24 @@ io.on('connection', socket => {
 
 const PORT = process.env.PORT || 3000;
 
+function startFirestoreListener() {
+  watchData((key, items) => {
+    appData[key] = items;
+    io.emit('dataUpdated', appData);
+  });
+}
+
 loadData()
   .then(d => {
     appData = d;
+    startFirestoreListener();
     httpServer.listen(PORT, () => {
       console.log(`Shopping List server running on http://localhost:${PORT}`);
     });
   })
   .catch(err => {
     console.error('Failed to load data from database', err);
+    startFirestoreListener();
     httpServer.listen(PORT, () => {
       console.log(`Shopping List server running on http://localhost:${PORT}`);
     });
