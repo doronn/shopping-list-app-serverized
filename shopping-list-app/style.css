@@ -183,6 +183,18 @@ nav button.active {
     z-index: 900;
 }
 
+#list-details-overlay.fullscreen {
+    justify-content: stretch;
+    align-items: stretch;
+}
+
+#list-details-overlay.fullscreen #list-details {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+}
+
 #list-details ul {
     list-style-type: none;
     padding: 0;
@@ -230,6 +242,9 @@ nav button.active {
     font-weight: bold;
     margin-top: 0.75rem;
     margin-bottom: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 /* Global item modal overlay style */

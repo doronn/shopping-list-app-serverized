@@ -29,6 +29,8 @@ const translations = {
         add_item: "Add Item",
         close: "Close",
         manage_items: "Manage Items",
+        toggle_fullscreen: "Fullscreen",
+        check_category: "Check Category",
         rename_list: "Rename",
         edit_global_item: "Edit",
         delete_list: "Delete",
@@ -101,6 +103,8 @@ const translations = {
         add_item: "הוספת פריט",
         close: "סגור",
         manage_items: "ניהול פריטים",
+        toggle_fullscreen: "מסך מלא",
+        check_category: "סמן קטגוריה",
         rename_list: "שנה שם",
         edit_global_item: "ערוך",
         delete_list: "מחק",
@@ -357,6 +361,8 @@ function applyLanguage() {
     const completeBtn = document.getElementById('complete-list-button');
     if (completeBtn) completeBtn.innerText = t.complete_list;
     document.getElementById('close-list-details').innerText = t.close;
+    const fullBtn = document.getElementById('toggle-maximize');
+    if (fullBtn) fullBtn.innerText = t.toggle_fullscreen;
     // Populate categories select for list items using data.categories
     const select = document.getElementById('item-category-select');
     if (select) {
@@ -700,10 +706,14 @@ function openListDetails(listId, isArchive = false) {
         renderItems(list);
     }
     overlay.classList.remove('hidden');
+    const maximized = localStorage.getItem('listDetailsFullscreen') === '1';
+    overlay.classList.toggle('fullscreen', maximized);
+    window.location.hash = `list=${listId}`;
 }
 
 function closeListDetails() {
     document.getElementById('list-details-overlay').classList.add('hidden');
+    history.replaceState(null, '', window.location.pathname + window.location.search);
 }
 
 // Render items of current list
@@ -711,12 +721,9 @@ function renderItems(list) {
     const container = document.getElementById('items-container');
     container.innerHTML = '';
     const t = translations[currentLanguage];
-    // Filter items by search term (case-insensitive)
     const term = itemSearchTerm.toLowerCase();
-    // Group items by their global item's category ID
     const groups = {};
     list.items.filter(item => {
-        // Filter by global item name instead of local name
         const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
         const itemName = globalItem ? globalItem.name : item.name;
         return !term || (itemName && itemName.toLowerCase().includes(term));
@@ -726,26 +733,57 @@ function renderItems(list) {
         if (!groups[cid]) groups[cid] = [];
         groups[cid].push(item);
     });
-    // Sort categories by name for display
-    const sortedCatIds = Object.keys(groups).sort((a, b) => {
-        const catA = data.categories.find(c => c.id === a);
-        const catB = data.categories.find(c => c.id === b);
-        const nameA = catA ? (catA.names[currentLanguage] || catA.names.en || catA.names.he || catA.id) : a;
-        const nameB = catB ? (catB.names[currentLanguage] || catB.names.en || catB.names.he || catB.id) : b;
-        return nameA.localeCompare(nameB);
-    });
-    sortedCatIds.forEach(catId => {
+    if (!list.collapsedCategories) list.collapsedCategories = [];
+    const orderIds = [];
+    data.categories.forEach(cat => { if (groups[cat.id]) orderIds.push(cat.id); });
+    Object.keys(groups).forEach(id => { if (!orderIds.includes(id)) orderIds.push(id); });
+    const bottomSection = document.createElement('div');
+    orderIds.forEach(catId => {
         const cat = data.categories.find(c => c.id === catId);
         const catName = cat ? (cat.names[currentLanguage] || cat.names.en || cat.names.he || cat.id) : catId;
-        // Category heading
+        const itemsArr = groups[catId];
+        const unchecked = itemsArr.filter(i => !i.isChecked);
+        const checked = itemsArr.filter(i => i.isChecked);
+        if (unchecked.length) renderCategory(catId, catName, unchecked, container, false);
+        if (checked.length) renderCategory(catId, catName, checked, bottomSection, true);
+    });
+    if (bottomSection.childElementCount > 0) {
+        const sep = document.createElement('hr');
+        container.appendChild(sep);
+        container.appendChild(bottomSection);
+    }
+
+    function renderCategory(catId, catName, itemsArr, parent, checkedSection) {
         const heading = document.createElement('div');
         heading.className = 'category-heading';
         heading.textContent = catName;
-        container.appendChild(heading);
-        // Items under this category
-        groups[catId].forEach(item => {
+        if (!checkedSection) {
+            const collapseBtn = document.createElement('button');
+            collapseBtn.textContent = list.collapsedCategories.includes(catId) ? '+' : '-';
+            collapseBtn.addEventListener('click', () => {
+                const idx = list.collapsedCategories.indexOf(catId);
+                if (idx >= 0) list.collapsedCategories.splice(idx, 1);
+                else list.collapsedCategories.push(catId);
+                saveData();
+                renderItems(list);
+            });
+            heading.appendChild(collapseBtn);
+            const checkBtn = document.createElement('button');
+            checkBtn.textContent = t.check_category;
+            checkBtn.addEventListener('click', async () => {
+                itemsArr.forEach(i => i.isChecked = true);
+                await saveData();
+                renderItems(list);
+                renderLists();
+                renderSummary();
+            });
+            heading.appendChild(checkBtn);
+        }
+        parent.appendChild(heading);
+        if (list.collapsedCategories.includes(catId)) return;
+        itemsArr.forEach(item => {
             const li = document.createElement('li');
-            // Checkbox for purchased
+            li.style.minHeight = '2.5rem';
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.checked = item.isChecked;
@@ -757,21 +795,17 @@ function renderItems(list) {
                 renderSummary();
             });
             li.appendChild(checkbox);
-            // Item info
             const info = document.createElement('span');
             info.style.flex = '1';
             info.style.marginLeft = '0.5rem';
             info.style.textDecoration = item.isChecked ? 'line-through' : 'none';
             const currency = document.getElementById('default-currency').value || '';
-            // Find global item for display
             const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
             const itemName = globalItem ? globalItem.name : item.name;
             const unit = item.quantityUnit || '';
-            // Pricing and total calculation with basis quantity and units
             const priceVal = item.actualPrice != null ? item.actualPrice : (globalItem ? globalItem.estimatedPrice : 0);
             const basis = item.priceBasisQuantity || 1;
             const priceUnit = item.actualPrice != null ? item.quantityUnit : (globalItem ? globalItem.priceUnit : item.quantityUnit);
-            // Compute total cost only when unit matches for estimated price or always for actual price
             let totalCost = null;
             if (item.actualPrice != null) {
                 totalCost = priceVal * (item.quantity / basis);
@@ -789,12 +823,36 @@ function renderItems(list) {
             }
             info.textContent = text;
             li.appendChild(info);
-            // Edit button
+            const upBtn = document.createElement('button');
+            upBtn.textContent = '↑';
+            upBtn.addEventListener('click', () => {
+                const idx = list.items.findIndex(i => i.id === item.id);
+                if (idx > 0) {
+                    const tmp = list.items[idx - 1];
+                    list.items[idx - 1] = list.items[idx];
+                    list.items[idx] = tmp;
+                    saveData();
+                    renderItems(list);
+                }
+            });
+            li.appendChild(upBtn);
+            const downBtn = document.createElement('button');
+            downBtn.textContent = '↓';
+            downBtn.addEventListener('click', () => {
+                const idx = list.items.findIndex(i => i.id === item.id);
+                if (idx < list.items.length - 1) {
+                    const tmp = list.items[idx + 1];
+                    list.items[idx + 1] = list.items[idx];
+                    list.items[idx] = tmp;
+                    saveData();
+                    renderItems(list);
+                }
+            });
+            li.appendChild(downBtn);
             const editBtn = document.createElement('button');
             editBtn.textContent = t.rename_list;
             editBtn.addEventListener('click', () => openItemModal(list.id, item.id));
             li.appendChild(editBtn);
-            // Delete button
             const deleteBtn = document.createElement('button');
             deleteBtn.textContent = t.delete_list;
             deleteBtn.addEventListener('click', () => {
@@ -808,9 +866,9 @@ function renderItems(list) {
                 }
             });
             li.appendChild(deleteBtn);
-            container.appendChild(li);
+            parent.appendChild(li);
         });
-    });
+    }
 }
 
 // Open modal to create or edit an item
@@ -993,6 +1051,15 @@ function setupEvents() {
             completeList(editingItemListId);
         });
     }
+    const fullBtn = document.getElementById('toggle-maximize');
+    if (fullBtn) {
+        fullBtn.addEventListener('click', () => {
+            const overlay = document.getElementById('list-details-overlay');
+            overlay.classList.toggle('fullscreen');
+            const maximized = overlay.classList.contains('fullscreen');
+            localStorage.setItem('listDetailsFullscreen', maximized ? '1' : '0');
+        });
+    }
     document.getElementById('save-item').addEventListener('click', saveItem);
     document.getElementById('cancel-item-modal').addEventListener('click', closeItemModal);
     // Tab navigation
@@ -1137,6 +1204,23 @@ async function init() {
     if (window.DataService && window.DataService.useServer) {
         window.DataService.initSocket();
     }
+
+    const hash = window.location.hash;
+    if (hash.startsWith('#list=')) {
+        const id = decodeURIComponent(hash.substring(6));
+        showPage('lists');
+        openListDetails(id);
+    }
+    window.addEventListener('hashchange', () => {
+        const h = window.location.hash;
+        if (h.startsWith('#list=')) {
+            const id = decodeURIComponent(h.substring(6));
+            showPage('lists');
+            openListDetails(id);
+        } else {
+            closeListDetails();
+        }
+    });
 }
 
 // Display list of uploaded receipts (names only) in summary page
@@ -1245,6 +1329,32 @@ function renderCategories() {
         const nameSpan = document.createElement('span');
         nameSpan.textContent = cat.names[currentLanguage] || cat.names.en || cat.names.he || cat.id;
         li.appendChild(nameSpan);
+        const upBtn = document.createElement('button');
+        upBtn.textContent = '↑';
+        upBtn.addEventListener('click', () => {
+            const idx = data.categories.findIndex(c => c.id === cat.id);
+            if (idx > 0) {
+                const tmp = data.categories[idx - 1];
+                data.categories[idx - 1] = data.categories[idx];
+                data.categories[idx] = tmp;
+                saveData();
+                renderCategories();
+            }
+        });
+        li.appendChild(upBtn);
+        const downBtn = document.createElement('button');
+        downBtn.textContent = '↓';
+        downBtn.addEventListener('click', () => {
+            const idx = data.categories.findIndex(c => c.id === cat.id);
+            if (idx < data.categories.length - 1) {
+                const tmp = data.categories[idx + 1];
+                data.categories[idx + 1] = data.categories[idx];
+                data.categories[idx] = tmp;
+                saveData();
+                renderCategories();
+            }
+        });
+        li.appendChild(downBtn);
         // Edit button for categories (rename names)
         const renameBtn = document.createElement('button');
         renameBtn.textContent = translations[currentLanguage].rename_list;
