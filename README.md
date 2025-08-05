@@ -5,7 +5,7 @@ This repository contains a simple shopping list web application and a small Node
 ## Project Structure
 
 - **shopping-list-app/** – HTML, CSS and JS for the client application.
-- **server/** – Express server that stores data in `data.json` and serves the frontend files.
+- **server/** – Express server that stores data in Firestore and serves the frontend files.
 - **package-lock.json** – placeholder for the root (no dependencies).
 
 ## Getting Started
@@ -16,7 +16,7 @@ This repository contains a simple shopping list web application and a small Node
    cd server
    npm install
    ```
-3. Start the server:
+3. Provide Firestore credentials via the `FIREBASE_SERVICE_ACCOUNT_JSON` environment variable containing a base64‑encoded service account JSON. Start the server:
    ```bash
    npm start
    ```
@@ -33,7 +33,7 @@ When the frontend loads it attempts to use the backend via `DataService`. If the
 
 ## Development Notes
 
-- The server keeps its data in `server/data.json`. It is loaded on startup and saved whenever changes occur.
+- The server keeps its data in Firestore and mirrors it in memory. Changes made directly in Firestore are watched and broadcast to connected clients.
 - Static files are served from the `shopping-list-app` directory.
 - WebSocket updates are broadcast using Socket.IO on every data change.
 - The client code lives in `shopping-list-app/script.js` and uses `dataService.js` to abstract storage.

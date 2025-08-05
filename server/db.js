@@ -61,4 +61,32 @@ async function saveData(data) {
   await batch.commit();
 }
 
-module.exports = { init, loadData, saveData };
+function watchCollection(collection, key, onChange) {
+  return db.collection(collection).onSnapshot(snapshot => {
+    const items = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (!data || typeof data !== 'object' || data.id !== doc.id) {
+        console.error(`Corrupted document in ${collection}: ${doc.id}`);
+        return;
+      }
+      items.push(data);
+    });
+    onChange(key, items);
+  }, err => {
+    console.error(`Listener error for ${collection}`, err);
+  });
+}
+
+function watchData(onChange) {
+  const unsubscribers = [
+    watchCollection('lists', 'lists', onChange),
+    watchCollection('items', 'globalItems', onChange),
+    watchCollection('categories', 'categories', onChange),
+    watchCollection('archivedLists', 'archivedLists', onChange),
+    watchCollection('receipts', 'receipts', onChange)
+  ];
+  return () => unsubscribers.forEach(unsub => unsub());
+}
+
+module.exports = { init, loadData, saveData, watchData };
