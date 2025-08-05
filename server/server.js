@@ -2,6 +2,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
+const { Server } = require('socket.io');
 const { init, loadData, saveData } = require('./db');
 
 // Simple in-memory storage for the shopping list data. The data is
@@ -15,8 +16,8 @@ let appData = {
 };
 
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, { cors: { origin: '*' } });
 
 init();
 
@@ -69,13 +70,13 @@ const PORT = process.env.PORT || 3000;
 loadData()
   .then(d => {
     appData = d;
-    server.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
       console.log(`Shopping List server running on http://localhost:${PORT}`);
     });
   })
   .catch(err => {
     console.error('Failed to load data from database', err);
-    server.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
       console.log(`Shopping List server running on http://localhost:${PORT}`);
     });
   });
