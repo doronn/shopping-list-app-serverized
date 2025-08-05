@@ -1,72 +1,65 @@
-const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 
-const DB_PATH = path.join(__dirname, 'app.db');
-const db = new sqlite3.Database(DB_PATH);
+let db;
 
 function init() {
-  db.serialize(() => {
-    db.run('CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, data TEXT)');
-    db.run('CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, data TEXT)');
-    db.run('CREATE TABLE IF NOT EXISTS categories (id TEXT PRIMARY KEY, data TEXT)');
-    db.run('CREATE TABLE IF NOT EXISTS archivedLists (id TEXT PRIMARY KEY, data TEXT)');
-    db.run('CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, data TEXT)');
-    db.run('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data TEXT)');
-  });
+  const serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_JSON, 'base64').toString('utf8'));
+  initializeApp({ credential: cert(serviceAccount) });
+  db = getFirestore();
 }
 
-function all(sql, params=[]) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err); else resolve(rows);
-    });
-  });
+async function loadCollection(name) {
+  const snapshot = await db.collection(name).get();
+  return snapshot.docs.map(doc => doc.data());
 }
 
-function run(sql, params=[]) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
-      if (err) reject(err); else resolve();
-    });
+async function clearCollection(name) {
+  const snapshot = await db.collection(name).get();
+  const batch = db.batch();
+  snapshot.docs.forEach(doc => {
+    batch.delete(doc.ref);
   });
+  await batch.commit();
 }
 
 async function loadData() {
-  const data = { lists: [], globalItems: [], categories: [], archivedLists: [], receipts: [] };
-  const listRows = await all('SELECT data FROM lists');
-  data.lists = listRows.map(r => JSON.parse(r.data));
-  const itemRows = await all('SELECT data FROM items');
-  data.globalItems = itemRows.map(r => JSON.parse(r.data));
-  const catRows = await all('SELECT data FROM categories');
-  data.categories = catRows.map(r => JSON.parse(r.data));
-  const archRows = await all('SELECT data FROM archivedLists');
-  data.archivedLists = archRows.map(r => JSON.parse(r.data));
-  const receiptRows = await all('SELECT data FROM receipts');
-  data.receipts = receiptRows.map(r => JSON.parse(r.data));
-  return data;
+  return {
+    lists: await loadCollection('lists'),
+    globalItems: await loadCollection('items'),
+    categories: await loadCollection('categories'),
+    archivedLists: await loadCollection('archivedLists'),
+    receipts: await loadCollection('receipts')
+  };
 }
 
 async function saveData(data) {
-  await run('DELETE FROM lists');
-  for (const l of data.lists) {
-    await run('INSERT INTO lists(id,data) VALUES (?,?)', [l.id, JSON.stringify(l)]);
-  }
-  await run('DELETE FROM items');
-  for (const i of data.globalItems) {
-    await run('INSERT INTO items(id,data) VALUES (?,?)', [i.id, JSON.stringify(i)]);
-  }
-  await run('DELETE FROM categories');
-  for (const c of data.categories) {
-    await run('INSERT INTO categories(id,data) VALUES (?,?)', [c.id, JSON.stringify(c)]);
-  }
-  await run('DELETE FROM archivedLists');
-  for (const a of data.archivedLists) {
-    await run('INSERT INTO archivedLists(id,data) VALUES (?,?)', [a.id, JSON.stringify(a)]);
-  }
-  await run('DELETE FROM receipts');
-  for (const r of data.receipts) {
-    await run('INSERT INTO receipts(id,data) VALUES (?,?)', [r.id, JSON.stringify(r)]);
-  }
+  // Clear existing collections before writing new data
+  await Promise.all([
+    clearCollection('lists'),
+    clearCollection('items'),
+    clearCollection('categories'),
+    clearCollection('archivedLists'),
+    clearCollection('receipts')
+  ]);
+
+  const batch = db.batch();
+  data.lists.forEach(item => {
+    batch.set(db.collection('lists').doc(item.id), item);
+  });
+  data.globalItems.forEach(item => {
+    batch.set(db.collection('items').doc(item.id), item);
+  });
+  data.categories.forEach(item => {
+    batch.set(db.collection('categories').doc(item.id), item);
+  });
+  data.archivedLists.forEach(item => {
+    batch.set(db.collection('archivedLists').doc(item.id), item);
+  });
+  data.receipts.forEach(item => {
+    batch.set(db.collection('receipts').doc(item.id), item);
+  });
+  await batch.commit();
 }
 
-module.exports = { db, init, loadData, saveData };
+module.exports = { init, loadData, saveData };
