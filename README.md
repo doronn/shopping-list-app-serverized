@@ -30,6 +30,8 @@ When the frontend loads it attempts to use the backend via `DataService`. If the
 - English and Hebrew translations with right‑to‑left support.
 - Optional import/export tools and receipt upload UI.
 - Real‑time synchronisation between browser tabs when connected to the server.
+- Lists can be linked directly via URL fragments (e.g. `#list=<id>`).
+- List detail view supports fullscreen mode, category bulk check, reordering and collapsible headings with checked items grouped at the bottom.
 
 ## Development Notes
 
