@@ -37,6 +37,7 @@ When the frontend loads it attempts to use the backend via `DataService`. If the
 - Undo and redo actions for list edits within the current session.
 - Revision tracking on the server with a client‑side save queue reduces conflicts when multiple users edit simultaneously.
 - Client changes are applied instantly and sent in debounced batches with unique IDs, allowing each client to ignore its own echoed updates.
+ - The client keeps track of the latest revision and drops out‑of‑date socket events so rapid edits aren’t overwritten by stale data.
 
 ## Development Notes
 

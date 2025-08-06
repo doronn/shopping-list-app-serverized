@@ -32,6 +32,7 @@ const DataService = {
     saveTimer: null,
     clientId: Math.random().toString(36).slice(2),
     pendingChangeIds: new Set(),
+    lastRevision: 0,
 
     generateId() {
         return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -84,7 +85,9 @@ const DataService = {
             try {
                 const resp = await fetch(`${this.serverBaseUrl}/data`);
                 if (resp.ok) {
-                    return await resp.json();
+                    const data = await resp.json();
+                    this.lastRevision = data.revision || 0;
+                    return data;
                 }
                 // Non‑OK responses cause a fallback to localStorage.
                 console.warn('Remote load failed with status', resp.status, '- falling back to localStorage');
@@ -96,7 +99,9 @@ const DataService = {
         try {
             const jsonStr = window.localStorage.getItem(STORAGE_KEY);
             if (!jsonStr) return null;
-            return JSON.parse(jsonStr);
+            const data = JSON.parse(jsonStr);
+            this.lastRevision = data.revision || 0;
+            return data;
         } catch (err) {
             console.error('Failed to load data from localStorage', err);
             return null;
@@ -131,6 +136,7 @@ const DataService = {
             this.pendingData = null;
             const changeId = this.generateId();
             this.pendingChangeIds.add(changeId);
+            setTimeout(() => this.pendingChangeIds.delete(changeId), 5000);
             try {
                 const resp = await fetch(`${this.serverBaseUrl}/data`, {
                     method: 'PUT',
@@ -140,7 +146,9 @@ const DataService = {
                 if (resp.status === 409) {
                     const serverData = await resp.json();
                     const merged = this.mergeData(serverData, payload);
+                    this.lastRevision = serverData.revision || 0;
                     this.pendingData = merged;
+                    this.pendingChangeIds.delete(changeId);
                     try {
                         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
                     } catch (e) {
@@ -153,22 +161,32 @@ const DataService = {
                 } else if (!resp.ok) {
                     console.warn('Remote save failed with status', resp.status, '- falling back to localStorage');
                     this.useServer = false;
+                    this.pendingChangeIds.delete(changeId);
                     try {
                         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
                     } catch (err) {
                         console.error('Failed to save data to localStorage', err);
                     }
+                } else {
+                    const resJson = await resp.json().catch(() => null);
+                    if (resJson && typeof resJson.revision === 'number') {
+                        this.lastRevision = resJson.revision;
+                        try {
+                            window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...payload, revision: resJson.revision }));
+                        } catch (e) {
+                            console.error('Failed to update localStorage after save', e);
+                        }
+                    }
                 }
             } catch (err) {
                 console.error('Failed to save data to server:', err);
                 this.useServer = false;
+                this.pendingChangeIds.delete(changeId);
                 try {
                     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
                 } catch (e) {
                     console.error('Failed to save data to localStorage', e);
                 }
-            } finally {
-                this.pendingChangeIds.delete(changeId);
             }
         }
         this.saveTimer = null;
@@ -197,6 +215,10 @@ const DataService = {
                 this.pendingChangeIds.delete(payload.changeId);
                 return;
             }
+            if (remoteData.revision != null && remoteData.revision <= this.lastRevision) {
+                return;
+            }
+            this.lastRevision = remoteData.revision || this.lastRevision;
             try {
                 window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteData));
             } catch (err) {
