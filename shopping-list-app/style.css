@@ -152,6 +152,9 @@ nav button.active {
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
     max-height: 90vh;
     overflow-y: auto;
+    /* Override Bootstrap's default modal styles */
+    display: block;
+    position: relative;
 }
 
 #modal-overlay,
