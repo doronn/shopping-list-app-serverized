@@ -562,6 +562,7 @@ function renderSummary() {
             createBtn.innerHTML = '<i class="bi bi-plus-lg"></i>';
             createBtn.title = t.create_from_missing;
             createBtn.addEventListener('click', () => {
+                if (!confirm(t.create_from_missing + '?')) return;
                 const newList = {
                     id: 'list-' + Date.now(),
                     name: list.name + ' - ' + t.missing,
@@ -1162,6 +1163,12 @@ function setupEvents() {
     document.getElementById('cancel-modal').addEventListener('click', closeListModal);
     document.getElementById('add-item-button').addEventListener('click', () => openItemModal(editingItemListId));
     document.getElementById('close-list-details').addEventListener('click', closeListDetails);
+    const listDetailsOverlay = document.getElementById('list-details-overlay');
+    listDetailsOverlay.addEventListener('click', e => {
+        if (e.target === listDetailsOverlay) {
+            closeListDetails();
+        }
+    });
     const fsBtn = document.getElementById('toggle-fullscreen');
     if (fsBtn) fsBtn.addEventListener('click', toggleListFullscreen);
     const completeBtn = document.getElementById('complete-list-button');
