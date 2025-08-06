@@ -307,14 +307,14 @@ async function loadData() {
     lastSavedData = clone(data);
 }
 
-async function saveData(pushUndo = true) {
+function saveData(pushUndo = true) {
     if (pushUndo && lastSavedData) {
         undoStack.push(clone(lastSavedData));
         if (undoStack.length > 100) undoStack.shift();
         redoStack = [];
     }
     lastSavedData = clone(data);
-    await window.DataService.saveData(data);
+    window.DataService.saveData(data);
 }
 
 // Apply translations to static UI elements
@@ -937,9 +937,9 @@ function renderItems(list) {
                     checkbox.type = 'checkbox';
                     checkbox.className = 'form-check-input mt-1';
                     checkbox.checked = item.isChecked;
-                    checkbox.addEventListener('change', async () => {
+                    checkbox.addEventListener('change', () => {
                         item.isChecked = checkbox.checked;
-                        await saveData();
+                        saveData();
                         renderItems(list);
                         renderLists();
                         renderSummary();
@@ -1739,7 +1739,7 @@ async function clearAllData() {
     };
     // Reload default categories and save to storage
     await loadData();
-    await saveData();
+    saveData();
     // Re-render all views
     renderLists();
     renderSummary();

@@ -28,8 +28,49 @@ const DataService = {
      * initialised by initSocket() to receive real‑time updates.
      */
     socket: null,
-    saving: false,
     pendingData: null,
+    saveTimer: null,
+    clientId: Math.random().toString(36).slice(2),
+    pendingChangeIds: new Set(),
+
+    generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).slice(2);
+    },
+
+    mergeById(serverArr = [], localArr = []) {
+        const map = new Map();
+        serverArr.forEach(i => map.set(i.id, JSON.parse(JSON.stringify(i))));
+        localArr.forEach(i => map.set(i.id, JSON.parse(JSON.stringify(i))));
+        return Array.from(map.values());
+    },
+
+    mergeLists(serverLists = [], localLists = []) {
+        const map = new Map();
+        serverLists.forEach(l => map.set(l.id, JSON.parse(JSON.stringify(l))));
+        localLists.forEach(l => {
+            const existing = map.get(l.id);
+            if (existing) {
+                existing.name = l.name;
+                existing.isCompleted = l.isCompleted;
+                existing.items = this.mergeById(existing.items || [], l.items || []);
+            } else {
+                map.set(l.id, JSON.parse(JSON.stringify(l)));
+            }
+        });
+        return Array.from(map.values());
+    },
+
+    mergeData(serverData, localData) {
+        return {
+            ...serverData,
+            lists: this.mergeLists(serverData.lists || [], localData.lists || []),
+            globalItems: this.mergeById(serverData.globalItems || [], localData.globalItems || []),
+            categories: this.mergeById(serverData.categories || [], localData.categories || []),
+            archivedLists: this.mergeLists(serverData.archivedLists || [], localData.archivedLists || []),
+            receipts: localData.receipts && localData.receipts.length ? localData.receipts : (serverData.receipts || []),
+            revision: serverData.revision
+        };
+    },
 
     /**
      * Load the application data from persistent storage or the remote API.
@@ -63,49 +104,18 @@ const DataService = {
     },
 
     /**
-     * Save the provided data object to persistent storage or the remote API.
+     * Queue a save of the provided data object. Multiple calls within a short
+     * time frame are batched and sent together to the server. The function
+     * returns immediately so UI updates remain responsive.
      * @param {Object} dataObj
-     * @returns {Promise<void>}
      */
-    async saveData(dataObj) {
+    saveData(dataObj) {
         if (this.useServer && this.serverBaseUrl) {
             this.pendingData = dataObj;
-            if (this.saving) return;
-            this.saving = true;
-            while (this.pendingData) {
-                const payload = this.pendingData;
-                this.pendingData = null;
-                try {
-                    const resp = await fetch(`${this.serverBaseUrl}/data`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    if (resp.status === 409) {
-                        const serverData = await resp.json();
-                        try {
-                            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(serverData));
-                        } catch (e) {
-                            console.error('Failed to update localStorage from conflict response', e);
-                        }
-                        if (typeof window.onRemoteDataUpdated === 'function') {
-                            window.onRemoteDataUpdated(serverData);
-                        }
-                    } else if (!resp.ok) {
-                        console.warn('Remote save failed with status', resp.status, '- falling back to localStorage');
-                        this.useServer = false;
-                        dataObj = payload;
-                        break;
-                    }
-                } catch (err) {
-                    console.error('Failed to save data to server:', err);
-                    this.useServer = false;
-                    dataObj = payload;
-                    break;
-                }
+            if (!this.saveTimer) {
+                this.saveTimer = setTimeout(() => this.flush(), 200);
             }
-            this.saving = false;
-            if (this.useServer) return;
+            return;
         }
         try {
             const json = JSON.stringify(dataObj);
@@ -113,6 +123,55 @@ const DataService = {
         } catch (err) {
             console.error('Failed to save data to localStorage', err);
         }
+    },
+
+    async flush() {
+        while (this.pendingData) {
+            const payload = this.pendingData;
+            this.pendingData = null;
+            const changeId = this.generateId();
+            this.pendingChangeIds.add(changeId);
+            try {
+                const resp = await fetch(`${this.serverBaseUrl}/data`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...payload, clientId: this.clientId, changeId })
+                });
+                if (resp.status === 409) {
+                    const serverData = await resp.json();
+                    const merged = this.mergeData(serverData, payload);
+                    this.pendingData = merged;
+                    try {
+                        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+                    } catch (e) {
+                        console.error('Failed to update localStorage from conflict response', e);
+                    }
+                    if (typeof window.onRemoteDataUpdated === 'function') {
+                        window.onRemoteDataUpdated(merged);
+                    }
+                    continue;
+                } else if (!resp.ok) {
+                    console.warn('Remote save failed with status', resp.status, '- falling back to localStorage');
+                    this.useServer = false;
+                    try {
+                        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+                    } catch (err) {
+                        console.error('Failed to save data to localStorage', err);
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to save data to server:', err);
+                this.useServer = false;
+                try {
+                    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+                } catch (e) {
+                    console.error('Failed to save data to localStorage', e);
+                }
+            } finally {
+                this.pendingChangeIds.delete(changeId);
+            }
+        }
+        this.saveTimer = null;
     },
 
     /**
@@ -132,9 +191,13 @@ const DataService = {
         this.socket.on('connect', () => {
             console.log('Connected to shopping list server');
         });
-        this.socket.on('dataUpdated', (remoteData) => {
+        this.socket.on('dataUpdated', (payload) => {
+            const remoteData = payload.data || payload;
+            if (payload.clientId === this.clientId && this.pendingChangeIds.has(payload.changeId)) {
+                this.pendingChangeIds.delete(payload.changeId);
+                return;
+            }
             try {
-                // Persist remote data locally for offline usage
                 window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteData));
             } catch (err) {
                 console.error('Failed to update localStorage from server', err);
@@ -142,7 +205,6 @@ const DataService = {
             if (typeof window.onRemoteDataUpdated === 'function') {
                 window.onRemoteDataUpdated(remoteData);
             } else {
-                // As a fallback, reload the page to reflect remote changes
                 console.log('Remote data updated, reload to apply changes');
             }
         });

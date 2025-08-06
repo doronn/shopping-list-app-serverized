@@ -35,7 +35,7 @@ app.get('/data', (req, res) => {
 
 // REST endpoint: PUT /data – replace the entire app state
 app.put('/data', async (req, res) => {
-  const newData = req.body;
+  const { clientId, changeId, ...newData } = req.body || {};
   if (!newData || typeof newData !== 'object') {
     res.status(400).json({ message: 'Invalid data' });
     return;
@@ -46,7 +46,7 @@ app.put('/data', async (req, res) => {
   }
   appData = { ...newData, revision: appData.revision + 1 };
   await saveData(appData);
-  io.emit('dataUpdated', appData);
+  io.emit('dataUpdated', { data: appData, clientId, changeId });
   res.json({ message: 'Data updated', revision: appData.revision });
 });
 
@@ -61,13 +61,13 @@ app.post('/data/clear', async (req, res) => {
     revision: appData.revision + 1
   };
   await saveData(appData);
-  io.emit('dataUpdated', appData);
+  io.emit('dataUpdated', { data: appData });
   res.json({ message: 'Data cleared' });
 });
 
 // WebSocket connection: send current data on connection
 io.on('connection', socket => {
-  socket.emit('dataUpdated', appData);
+  socket.emit('dataUpdated', { data: appData });
 });
 
 const PORT = process.env.PORT || 3000;
@@ -76,7 +76,7 @@ function startFirestoreListener() {
   watchData((key, items) => {
     appData[key] = items;
     appData.revision++;
-    io.emit('dataUpdated', appData);
+    io.emit('dataUpdated', { data: appData });
   });
 }
 
