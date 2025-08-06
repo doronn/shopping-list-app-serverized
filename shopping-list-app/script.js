@@ -78,7 +78,9 @@ const translations = {
         maximize: "Maximize",
         restore: "Restore",
         check_all: "Check All",
-        uncheck_all: "Uncheck All"
+        uncheck_all: "Uncheck All",
+        undo: "Undo",
+        redo: "Redo"
     },
     he: {
         app_title: "רשימת קניות",
@@ -155,7 +157,9 @@ const translations = {
         maximize: "מסך מלא",
         restore: "יציאה ממסך מלא",
         check_all: "סמן הכל",
-        uncheck_all: "בטל סימון הכל"
+        uncheck_all: "בטל סימון הכל",
+        undo: "בטל",
+        redo: "שחזר"
     }
 };
 
@@ -166,7 +170,8 @@ let data = {
     globalItems: [],
     categories: [],
     archivedLists: [],
-    receipts: []
+    receipts: [],
+    revision: 0
 };
 let currentLanguage = 'en';
 let editingListId = null;
@@ -178,6 +183,11 @@ let editingArchive = false;
 const isMobile = /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.test(navigator.userAgent);
 let collapsedCategories = JSON.parse(localStorage.getItem('collapsedCategories') || '{}');
 let listFullscreen = localStorage.getItem('listFullscreen') === 'true';
+
+const clone = obj => JSON.parse(JSON.stringify(obj));
+let undoStack = [];
+let redoStack = [];
+let lastSavedData = null;
 
 // Update datalist options for global item suggestions
 function updateGlobalItemSuggestions() {
@@ -269,6 +279,7 @@ async function loadData() {
     data.categories = data.categories || [];
     data.archivedLists = data.archivedLists || [];
     data.receipts = data.receipts || [];
+    data.revision = data.revision || 0;
     // If categories empty, populate default categories with translations
     if (data.categories.length === 0) {
         data.categories = [
@@ -293,9 +304,16 @@ async function loadData() {
             if (item.priceBasisQuantity == null) item.priceBasisQuantity = 1;
         });
     });
+    lastSavedData = clone(data);
 }
 
-async function saveData() {
+async function saveData(pushUndo = true) {
+    if (pushUndo && lastSavedData) {
+        undoStack.push(clone(lastSavedData));
+        if (undoStack.length > 100) undoStack.shift();
+        redoStack = [];
+    }
+    lastSavedData = clone(data);
     await window.DataService.saveData(data);
 }
 
@@ -384,6 +402,18 @@ function applyLanguage() {
         completeBtn.innerHTML = '<i class="bi bi-check2-circle"></i>';
         completeBtn.title = t.complete_list;
         completeBtn.className = 'btn btn-success btn-sm';
+    }
+    const undoBtn = document.getElementById('undo-button');
+    if (undoBtn) {
+        undoBtn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i>';
+        undoBtn.title = t.undo;
+        undoBtn.className = 'btn btn-secondary btn-sm';
+    }
+    const redoBtn = document.getElementById('redo-button');
+    if (redoBtn) {
+        redoBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+        redoBtn.title = t.redo;
+        redoBtn.className = 'btn btn-secondary btn-sm';
     }
     const closeBtn = document.getElementById('close-list-details');
     closeBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
@@ -1163,6 +1193,8 @@ function setupEvents() {
     document.getElementById('cancel-modal').addEventListener('click', closeListModal);
     document.getElementById('add-item-button').addEventListener('click', () => openItemModal(editingItemListId));
     document.getElementById('close-list-details').addEventListener('click', closeListDetails);
+    document.getElementById('undo-button').addEventListener('click', undo);
+    document.getElementById('redo-button').addEventListener('click', redo);
     const listDetailsOverlay = document.getElementById('list-details-overlay');
     listDetailsOverlay.addEventListener('click', e => {
         if (e.target === listDetailsOverlay) {
@@ -1658,6 +1690,39 @@ function exportToCSV() {
     URL.revokeObjectURL(url);
 }
 
+function refreshUI() {
+    renderLists();
+    renderSummary();
+    renderGlobalItems();
+    renderArchive();
+    renderCategories();
+    updateGlobalItemSuggestions();
+    const overlay = document.getElementById('list-details-overlay');
+    if (overlay && !overlay.classList.contains('hidden')) {
+        const listArr = editingArchive ? data.archivedLists : data.lists;
+        const current = listArr.find(l => l.id === editingItemListId);
+        if (current) renderItems(current);
+    }
+}
+
+function undo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(clone(data));
+    data = undoStack.pop();
+    lastSavedData = clone(data);
+    refreshUI();
+    saveData(false);
+}
+
+function redo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(clone(data));
+    data = redoStack.pop();
+    lastSavedData = clone(data);
+    refreshUI();
+    saveData(false);
+}
+
 // Clear all data from localStorage and reset app
 async function clearAllData() {
     const t = translations[currentLanguage];
@@ -1722,6 +1787,9 @@ window.onRemoteDataUpdated = function(remoteData) {
     data.categories = data.categories || [];
     data.archivedLists = data.archivedLists || [];
     data.receipts = data.receipts || [];
+    lastSavedData = clone(data);
+    undoStack = [];
+    redoStack = [];
     // DataService.initSocket() already persisted the remote data to
     // localStorage when it received the event. Avoid saving again here
     // to prevent an update loop that would broadcast the data back to

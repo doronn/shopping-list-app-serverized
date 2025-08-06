@@ -34,6 +34,8 @@ When the frontend loads it attempts to use the backend via `DataService`. If the
 - English and Hebrew translations with right‑to‑left support.
 - Optional import/export tools and receipt upload UI.
 - Real‑time synchronisation between browser tabs when connected to the server.
+- Undo and redo actions for list edits within the current session.
+- Revision tracking on the server with a client‑side save queue reduces conflicts when multiple users edit simultaneously.
 
 ## Development Notes
 

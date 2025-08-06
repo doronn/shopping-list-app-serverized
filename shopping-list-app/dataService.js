@@ -28,6 +28,8 @@ const DataService = {
      * initialised by initSocket() to receive real‑time updates.
      */
     socket: null,
+    saving: false,
+    pendingData: null,
 
     /**
      * Load the application data from persistent storage or the remote API.
@@ -66,24 +68,45 @@ const DataService = {
      * @returns {Promise<void>}
      */
     async saveData(dataObj) {
-        // Try saving to the server when useServer is true.
         if (this.useServer && this.serverBaseUrl) {
-            try {
-                const resp = await fetch(`${this.serverBaseUrl}/data`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(dataObj)
-                });
-                if (resp.ok) {
-                    return;
+            this.pendingData = dataObj;
+            if (this.saving) return;
+            this.saving = true;
+            while (this.pendingData) {
+                const payload = this.pendingData;
+                this.pendingData = null;
+                try {
+                    const resp = await fetch(`${this.serverBaseUrl}/data`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (resp.status === 409) {
+                        const serverData = await resp.json();
+                        try {
+                            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(serverData));
+                        } catch (e) {
+                            console.error('Failed to update localStorage from conflict response', e);
+                        }
+                        if (typeof window.onRemoteDataUpdated === 'function') {
+                            window.onRemoteDataUpdated(serverData);
+                        }
+                    } else if (!resp.ok) {
+                        console.warn('Remote save failed with status', resp.status, '- falling back to localStorage');
+                        this.useServer = false;
+                        dataObj = payload;
+                        break;
+                    }
+                } catch (err) {
+                    console.error('Failed to save data to server:', err);
+                    this.useServer = false;
+                    dataObj = payload;
+                    break;
                 }
-                // Non‑OK responses trigger fallback to localStorage.
-                console.warn('Remote save failed with status', resp.status, '- falling back to localStorage');
-            } catch (err) {
-                console.error('Failed to save data to server:', err);
             }
+            this.saving = false;
+            if (this.useServer) return;
         }
-        // Fallback: store data in localStorage.
         try {
             const json = JSON.stringify(dataObj);
             window.localStorage.setItem(STORAGE_KEY, json);

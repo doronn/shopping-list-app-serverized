@@ -12,7 +12,8 @@ let appData = {
   globalItems: [],
   categories: [],
   archivedLists: [],
-  receipts: []
+  receipts: [],
+  revision: 0
 };
 
 const app = express();
@@ -39,11 +40,14 @@ app.put('/data', async (req, res) => {
     res.status(400).json({ message: 'Invalid data' });
     return;
   }
-  appData = newData;
+  if (typeof newData.revision !== 'number' || newData.revision !== appData.revision) {
+    res.status(409).json(appData);
+    return;
+  }
+  appData = { ...newData, revision: appData.revision + 1 };
   await saveData(appData);
-  // Broadcast to all connected clients that data has changed
   io.emit('dataUpdated', appData);
-  res.json({ message: 'Data updated' });
+  res.json({ message: 'Data updated', revision: appData.revision });
 });
 
 // REST endpoint: POST /data/clear – reset app state
@@ -53,7 +57,8 @@ app.post('/data/clear', async (req, res) => {
     globalItems: [],
     categories: [],
     archivedLists: [],
-    receipts: []
+    receipts: [],
+    revision: appData.revision + 1
   };
   await saveData(appData);
   io.emit('dataUpdated', appData);
@@ -70,13 +75,14 @@ const PORT = process.env.PORT || 3000;
 function startFirestoreListener() {
   watchData((key, items) => {
     appData[key] = items;
+    appData.revision++;
     io.emit('dataUpdated', appData);
   });
 }
 
 loadData()
   .then(d => {
-    appData = d;
+    appData = { ...d, revision: 0 };
     startFirestoreListener();
     httpServer.listen(PORT, () => {
       console.log(`Shopping List server running on http://localhost:${PORT}`);
@@ -84,6 +90,7 @@ loadData()
   })
   .catch(err => {
     console.error('Failed to load data from database', err);
+    appData.revision = 0;
     startFirestoreListener();
     httpServer.listen(PORT, () => {
       console.log(`Shopping List server running on http://localhost:${PORT}`);
