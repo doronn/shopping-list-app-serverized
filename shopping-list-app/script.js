@@ -1,5 +1,5 @@
-// Simple Shopping List App in vanilla JS
-// Data is stored in localStorage under the key "shoppingListData".
+// Simple Shopping List App in vanilla JS with enhanced collaboration features
+// Data is stored via DataService with real-time synchronization and conflict resolution.
 
 // Translation strings for English and Hebrew
 const translations = {
@@ -173,6 +173,13 @@ let data = {
     receipts: [],
     revision: 0
 };
+
+// Collaboration state
+let connectedUsers = [];
+let activeEditors = {};
+let isEditing = false;
+let currentEditingContext = null;
+
 let currentLanguage = 'en';
 let editingListId = null;
 let editingItemListId = null;
@@ -307,14 +314,26 @@ async function loadData() {
     lastSavedData = clone(data);
 }
 
-function saveData(pushUndo = true) {
+function saveData(pushUndo = true, operationType = null, operationPath = null, operationData = null) {
     if (pushUndo && lastSavedData) {
         undoStack.push(clone(lastSavedData));
         if (undoStack.length > 100) undoStack.shift();
         redoStack = [];
     }
     lastSavedData = clone(data);
-    window.DataService.saveData(data);
+
+    // Track operations for collaborative editing
+    const operations = [];
+    if (operationType && operationPath) {
+        operations.push(window.DataService.createOperation(operationType, operationPath, operationData));
+    }
+
+    window.DataService.saveData(data, operations);
+
+    // Send real-time operations for immediate updates
+    if (operations.length > 0) {
+        window.DataService.sendOperations(operations);
+    }
 }
 
 // Apply translations to static UI elements
@@ -467,6 +486,7 @@ function renderLists() {
     data.lists.forEach(list => {
         const li = document.createElement('li');
         li.className = 'list-group-item d-flex align-items-start justify-content-between gap-2';
+        li.setAttribute('data-list-id', list.id);
         const t = translations[currentLanguage];
         // List name and stats
         const info = document.createElement('div');
@@ -525,6 +545,13 @@ function renderLists() {
         });
         btnGroup.appendChild(deleteBtn);
         li.appendChild(btnGroup);
+
+        // Check if list is being edited
+        if (window.DataService.isBeingEdited(list.id)) {
+            const editor = window.DataService.getActiveEditors(list.id);
+            showEditingBadge(editor.userId, list.id);
+        }
+
         container.appendChild(li);
     });
 }
@@ -634,9 +661,9 @@ function renderGlobalItems() {
         // Info
         const info = document.createElement('div');
         info.style.flex = '1';
-        const name = document.createElement('strong');
-        name.textContent = item.name;
-        info.appendChild(name);
+        const itemName = document.createElement('strong');
+        itemName.textContent = item.name;
+        info.appendChild(itemName);
         const cat = data.categories.find(c => c.id === item.categoryId);
         const catName = cat ? (cat.names[currentLanguage] || cat.names.en || cat.names.he || cat.id) : item.categoryId;
         const details = document.createElement('div');
@@ -713,15 +740,15 @@ function closeGlobalItemModal() {
 }
 
 function saveGlobalItem() {
-    const name = document.getElementById('global-name-input').value.trim();
+    const itemName = document.getElementById('global-name-input').value.trim();
     const categoryId = document.getElementById('global-category-select').value;
     const price = parseFloat(document.getElementById('global-price-input').value) || 0;
     const unit = document.getElementById('global-unit-select').value;
-    if (!name) return;
+    if (!itemName) return;
     if (editingGlobalItemId) {
         const item = data.globalItems.find(g => g.id === editingGlobalItemId);
         if (item) {
-            item.name = name;
+            item.name = itemName;
             item.categoryId = categoryId;
             item.estimatedPrice = price;
             item.priceUnit = unit;
@@ -729,7 +756,7 @@ function saveGlobalItem() {
     } else {
         const newItem = {
             id: 'global-' + Date.now(),
-            name,
+            name: itemName,
             categoryId,
             estimatedPrice: price,
             priceUnit: unit,
@@ -767,15 +794,15 @@ function closeListModal() {
 
 // Save list (new or edited)
 function saveList() {
-    const name = document.getElementById('list-name-input').value.trim();
-    if (!name) return;
+    const listName = document.getElementById('list-name-input').value.trim();
+    if (!listName) return;
     if (editingListId) {
         // Edit existing
         const list = data.lists.find(l => l.id === editingListId);
-        if (list) list.name = name;
+        if (list) list.name = listName;
     } else {
         // Create new
-        data.lists.push({ id: 'list-' + Date.now(), name: name, items: [] });
+        data.lists.push({ id: 'list-' + Date.now(), name: listName, items: [] });
     }
     saveData();
     renderLists();
@@ -788,241 +815,68 @@ function openListDetails(listId, isArchive = false) {
     editingArchive = isArchive;
     editingItemListId = listId;
     editingItemId = null;
+
+    // Track editing presence
+    window.DataService.updatePresence('editStart', listId);
+    isEditing = true;
+    currentEditingContext = { listId, isArchive };
+
     const overlay = document.getElementById('list-details-overlay');
     const title = document.getElementById('list-details-title');
-    // Determine which array to search based on archive flag
+
     const list = (isArchive ? data.archivedLists : data.lists).find(l => l.id === listId);
     const t = translations[currentLanguage];
+
     if (list) {
         title.textContent = list.name;
+        title.setAttribute('data-list-id', listId);
         renderItems(list);
     }
+
     overlay.classList.remove('hidden');
     const url = new URL(window.location);
     url.searchParams.set('list', listId);
     history.replaceState(null, '', url);
     applyFullscreenState();
+
+    // Show editing indicators
+    showEditingIndicators(listId);
 }
 
 function closeListDetails() {
     const overlay = document.getElementById('list-details-overlay');
     overlay.classList.add('hidden');
+
+    // Clear editing presence
+    if (currentEditingContext) {
+        window.DataService.updatePresence('editEnd', currentEditingContext.listId);
+        clearEditingBadges(currentEditingContext.listId);
+        currentEditingContext = null;
+    }
+
+    isEditing = false;
+
     const url = new URL(window.location);
     url.searchParams.delete('list');
     history.replaceState(null, '', url);
 }
-function applyFullscreenState() {
-    const overlay = document.getElementById('list-details-overlay');
-    const modal = document.getElementById('list-details');
-    const btn = document.getElementById('toggle-fullscreen');
-    if (listFullscreen) {
-        overlay.classList.add('fullscreen');
-        modal.classList.add('fullscreen');
-        if (btn) btn.innerText = translations[currentLanguage].restore;
-    } else {
-        overlay.classList.remove('fullscreen');
-        modal.classList.remove('fullscreen');
-        if (btn) btn.innerText = translations[currentLanguage].maximize;
-    }
-}
 
-function toggleListFullscreen() {
-    listFullscreen = !listFullscreen;
-    localStorage.setItem('listFullscreen', listFullscreen);
-    applyFullscreenState();
-}
-
-function getItemCategory(item) {
-    const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-    return globalItem ? globalItem.categoryId : (item.categoryId || 'other');
-}
-
-function moveCategory(catId, dir, list) {
-    const idx = data.categories.findIndex(c => c.id === catId);
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= data.categories.length) return;
-    const [cat] = data.categories.splice(idx, 1);
-    data.categories.splice(newIdx, 0, cat);
-    saveData();
-    renderCategories();
-    renderItems(list);
-}
-
-function moveItem(list, itemId, dir) {
-    const idx = list.items.findIndex(i => i.id === itemId);
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= list.items.length) return;
-    const [it] = list.items.splice(idx, 1);
-    list.items.splice(newIdx, 0, it);
-    saveData();
-    renderItems(list);
-}
-
-function setCategoryChecked(list, catId, checked) {
-    list.items.forEach(it => {
-        if (getItemCategory(it) === catId) {
-            it.isChecked = checked;
-        }
-    });
-    saveData();
-    renderItems(list);
-    renderLists();
-    renderSummary();
-}
-
-// Render items of current list
-function renderItems(list) {
-    const container = document.getElementById('items-container');
-    const checkedContainer = document.getElementById('checked-items-container');
-    container.innerHTML = '';
-    checkedContainer.innerHTML = '';
-    const t = translations[currentLanguage];
-    const term = itemSearchTerm.toLowerCase();
-    const groups = {};
-    list.items.filter(item => {
-        const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-        const itemName = globalItem ? globalItem.name : item.name;
-        return !term || (itemName && itemName.toLowerCase().includes(term));
-    }).forEach(item => {
-        const cid = getItemCategory(item);
-        if (!groups[cid]) groups[cid] = [];
-        groups[cid].push(item);
-    });
-    data.categories.forEach(cat => {
-        const catId = cat.id;
-        const items = groups[catId] || [];
-        if (items.length === 0) return;
-        const catName = cat.names[currentLanguage] || cat.names.en || cat.names.he || cat.id;
-        const unchecked = items.filter(i => !i.isChecked);
-        const checked = items.filter(i => i.isChecked);
-        const renderSection = (target, arr) => {
-            const heading = document.createElement('div');
-            heading.className = 'category-heading d-flex align-items-center gap-2';
-            const collapseBtn = document.createElement('button');
-            collapseBtn.className = 'btn btn-sm btn-outline-secondary';
-            collapseBtn.innerHTML = collapsedCategories[catId] ? '<i class="bi bi-chevron-right"></i>' : '<i class="bi bi-chevron-down"></i>';
-            collapseBtn.addEventListener('click', () => {
-                collapsedCategories[catId] = !collapsedCategories[catId];
-                localStorage.setItem('collapsedCategories', JSON.stringify(collapsedCategories));
-                renderItems(list);
-            });
-            heading.appendChild(collapseBtn);
-            const span = document.createElement('span');
-            span.textContent = catName;
-            heading.appendChild(span);
-            const checkBox = document.createElement('input');
-            checkBox.type = 'checkbox';
-            checkBox.className = 'form-check-input ms-2';
-            checkBox.checked = arr.length > 0 && arr.every(i => i.isChecked);
-            checkBox.addEventListener('change', () => {
-                setCategoryChecked(list, catId, checkBox.checked);
-            });
-            heading.appendChild(checkBox);
-            const upBtn = document.createElement('button');
-            upBtn.className = 'btn btn-sm btn-outline-secondary';
-            upBtn.innerHTML = '<i class="bi bi-chevron-up"></i>';
-            upBtn.addEventListener('click', () => moveCategory(catId, -1, list));
-            heading.appendChild(upBtn);
-            const downBtn = document.createElement('button');
-            downBtn.className = 'btn btn-sm btn-outline-secondary';
-            downBtn.innerHTML = '<i class="bi bi-chevron-down"></i>';
-            downBtn.addEventListener('click', () => moveCategory(catId, 1, list));
-            heading.appendChild(downBtn);
-            target.appendChild(heading);
-            if (!collapsedCategories[catId]) {
-                arr.forEach(item => {
-                    const li = document.createElement('li');
-                    li.className = 'list-group-item d-flex align-items-start gap-2';
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.className = 'form-check-input mt-1';
-                    checkbox.checked = item.isChecked;
-                    checkbox.addEventListener('change', () => {
-                        item.isChecked = checkbox.checked;
-                        saveData();
-                        renderItems(list);
-                        renderLists();
-                        renderSummary();
-                    });
-                    li.appendChild(checkbox);
-                    const info = document.createElement('span');
-                    info.className = 'item-text flex-grow-1';
-                    info.style.textDecoration = item.isChecked ? 'line-through' : 'none';
-                    const currency = document.getElementById('default-currency').value || '';
-                    const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-                    const itemName = globalItem ? globalItem.name : item.name;
-                    const unit = item.quantityUnit || '';
-                    const priceVal = item.actualPrice != null ? item.actualPrice : (globalItem ? globalItem.estimatedPrice : 0);
-                    const basis = item.priceBasisQuantity || 1;
-                    const priceUnit = item.actualPrice != null ? item.quantityUnit : (globalItem ? globalItem.priceUnit : item.quantityUnit);
-                    let totalCost = null;
-                    if (item.actualPrice != null) {
-                        totalCost = priceVal * (item.quantity / basis);
-                    } else if (globalItem && globalItem.priceUnit === item.quantityUnit) {
-                        totalCost = priceVal * (item.quantity / basis);
-                    }
-                    const quantityDisplay = `${item.quantity}${unit ? ' ' + unit : ''}`;
-                    let priceDisplay = `${currency}${priceVal.toFixed(2)}`;
-                    if (basis !== 1) priceDisplay += ` / ${basis}`;
-                    if (priceUnit) priceDisplay += ` ${priceUnit}`;
-                    let text = `${itemName} (${quantityDisplay})`;
-                    text += `, ${priceDisplay}`;
-                    if (totalCost != null) {
-                        text += ` × ${item.quantity} = ${currency}${totalCost.toFixed(2)}`;
-                    }
-                    info.textContent = text;
-                    li.appendChild(info);
-                    const btnGroup = document.createElement('div');
-                    btnGroup.className = 'btn-group btn-group-sm';
-                    const up = document.createElement('button');
-                    up.className = 'btn btn-outline-secondary';
-                    up.innerHTML = '<i class="bi bi-chevron-up"></i>';
-                    up.addEventListener('click', () => moveItem(list, item.id, -1));
-                    btnGroup.appendChild(up);
-                    const down = document.createElement('button');
-                    down.className = 'btn btn-outline-secondary';
-                    down.innerHTML = '<i class="bi bi-chevron-down"></i>';
-                    down.addEventListener('click', () => moveItem(list, item.id, 1));
-                    btnGroup.appendChild(down);
-                    const editBtn = document.createElement('button');
-                    editBtn.className = 'btn btn-outline-secondary';
-                    editBtn.innerHTML = '<i class="bi bi-pencil"></i>';
-                    editBtn.title = t.rename_list;
-                    editBtn.addEventListener('click', () => openItemModal(list.id, item.id));
-                    btnGroup.appendChild(editBtn);
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'btn btn-outline-danger';
-                    deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
-                    deleteBtn.title = t.delete_list;
-                    deleteBtn.addEventListener('click', () => {
-                        const index = list.items.findIndex(i => i.id === item.id);
-                        if (index >= 0) {
-                            list.items.splice(index, 1);
-                            saveData();
-                            renderItems(list);
-                            renderLists();
-                            renderSummary();
-                        }
-                    });
-                    btnGroup.appendChild(deleteBtn);
-                    li.appendChild(btnGroup);
-                    target.appendChild(li);
-                });
-            }
-        };
-        if (unchecked.length > 0) renderSection(container, unchecked);
-        if (checked.length > 0) renderSection(checkedContainer, checked);
-    });
-    const hasChecked = checkedContainer.children.length > 0;
-    checkedContainer.style.display = hasChecked ? '' : 'none';
-    const headingEl = document.getElementById('checked-heading');
-    if (headingEl) headingEl.style.display = hasChecked ? '' : 'none';
-}
-
-// Open modal to create or edit an item
+// Open item modal to create or edit an item
 function openItemModal(listId, itemId = null) {
     editingItemListId = listId;
     editingItemId = itemId;
+
+    // Check if item is being edited by someone else
+    if (itemId && window.DataService.isBeingEdited(listId, itemId)) {
+        const editor = window.DataService.getActiveEditors(listId, itemId);
+        if (!confirm(`${editor.userId} is currently editing this item. Continue anyway?`)) {
+            return;
+        }
+    }
+
+    // Track editing presence
+    window.DataService.updatePresence('editStart', listId, itemId);
+
     const overlay = document.getElementById('item-modal-overlay');
     const t = translations[currentLanguage];
     const title = document.getElementById('item-modal-title');
@@ -1061,12 +915,24 @@ function openItemModal(listId, itemId = null) {
         document.getElementById('item-price-basis-input').value = 1;
         document.getElementById('item-notes-input').value = '';
     }
+    // Add data attributes for tracking
+    const modal = document.getElementById('item-modal');
+    modal.setAttribute('data-list-id', listId);
+    if (itemId) modal.setAttribute('data-item-id', itemId);
+
     overlay.classList.remove('hidden');
 }
 
 function closeItemModal() {
     const overlay = document.getElementById('item-modal-overlay');
     overlay.classList.add('hidden');
+
+    // Clear editing presence
+    if (editingItemListId) {
+        window.DataService.updatePresence('editEnd', editingItemListId, editingItemId);
+        clearEditingBadges(editingItemListId, editingItemId);
+    }
+
     const nameInput = document.getElementById('item-name-input');
     if (nameInput) delete nameInput.dataset.selectedId;
 }
@@ -1075,8 +941,9 @@ function closeItemModal() {
 function saveItem() {
     const list = (editingArchive ? data.archivedLists : data.lists).find(l => l.id === editingItemListId);
     if (!list) return;
+
     const nameInput = document.getElementById('item-name-input');
-    const name = nameInput.value.trim();
+    const itemName = nameInput.value.trim();
     const categoryId = document.getElementById('item-category-select').value;
     const quantity = parseFloat(document.getElementById('item-quantity-input').value) || 1;
     const quantityUnit = document.getElementById('item-unit-select').value || 'piece';
@@ -1085,7 +952,7 @@ function saveItem() {
     const price = priceStr ? parseFloat(priceStr) : null;
     const priceBasisQuantity = parseFloat(document.getElementById('item-price-basis-input').value) || 1;
     const notes = document.getElementById('item-notes-input').value.trim();
-    if (!name) return;
+    if (!itemName) return;
     // Determine global item reference
     let globalItem = null;
     if (nameInput.dataset.selectedId) {
@@ -1093,14 +960,14 @@ function saveItem() {
     }
     if (!globalItem) {
         // Find existing global item by name and category
-        globalItem = data.globalItems.find(g => g.name.toLowerCase() === name.toLowerCase() && g.categoryId === categoryId);
+        globalItem = data.globalItems.find(g => g.name.toLowerCase() === itemName.toLowerCase() && g.categoryId === categoryId);
     }
     if (!globalItem) {
         // Create new global item; use estimated price from actual price input if provided, otherwise 0
         const estimated = price != null ? price : 0;
         globalItem = {
             id: 'global-' + Date.now() + Math.random(),
-            name,
+            name: itemName,
             categoryId,
             estimatedPrice: estimated,
             priceUnit: quantityUnit,
@@ -1109,13 +976,15 @@ function saveItem() {
         };
         data.globalItems.push(globalItem);
     }
+
+    let newItem = null;
+
     if (editingItemId) {
         // Edit existing list item
         const item = list.items.find(i => i.id === editingItemId);
         if (item) {
             // If the global item reference has changed and another item with the same global item exists,
             // merge them instead of creating duplicates
-            const oldGlobalId = item.globalItemId;
             item.globalItemId = globalItem.id;
             // Check if there is another item in the same list with the same globalItemId (excluding this item)
             const duplicate = list.items.find(i => i.id !== item.id && i.globalItemId === globalItem.id);
@@ -1139,6 +1008,7 @@ function saveItem() {
                 // Remove the old item from list
                 const index = list.items.findIndex(i => i.id === item.id);
                 if (index >= 0) list.items.splice(index, 1);
+                newItem = duplicate;
             } else {
                 // No duplicate, just update the item values normally
                 item.quantity = quantity;
@@ -1146,6 +1016,7 @@ function saveItem() {
                 item.actualPrice = price;
                 item.priceBasisQuantity = priceBasisQuantity;
                 item.notes = notes;
+                newItem = item;
             }
         }
     } else {
@@ -1159,9 +1030,10 @@ function saveItem() {
             if (notes) {
                 existing.notes = existing.notes ? `${existing.notes}; ${notes}` : notes;
             }
+            newItem = existing;
         } else {
             // Create new list item with wrapper referencing global item
-            list.items.push({
+            newItem = {
                 id: 'item-' + Date.now() + Math.random(),
                 globalItemId: globalItem.id,
                 quantity,
@@ -1170,374 +1042,29 @@ function saveItem() {
                 priceBasisQuantity,
                 notes,
                 isChecked: false
-            });
+            };
+            list.items.push(newItem);
         }
     }
-    saveData();
+    const operationType = editingItemId ? 'update' : 'create';
+    const operationPath = editingItemId ?
+        `lists/${editingItemListId}/items/${editingItemId}` :
+        `lists/${editingItemListId}/items`;
+
+    // Track the operation for collaborative editing
+    saveData(true, operationType, operationPath, newItem);
+
     renderItems(list);
     renderLists();
     renderSummary();
     renderGlobalItems();
     updateGlobalItemSuggestions();
-    // If editing an archived list, re-render archive to reflect changes
+
     if (editingArchive) {
         renderArchive();
     }
+
     closeItemModal();
-}
-
-// Setup event listeners
-function setupEvents() {
-    document.getElementById('add-list-button').addEventListener('click', () => openListModal());
-    document.getElementById('save-list').addEventListener('click', saveList);
-    document.getElementById('cancel-modal').addEventListener('click', closeListModal);
-    document.getElementById('add-item-button').addEventListener('click', () => openItemModal(editingItemListId));
-    document.getElementById('close-list-details').addEventListener('click', closeListDetails);
-    document.getElementById('undo-button').addEventListener('click', undo);
-    document.getElementById('redo-button').addEventListener('click', redo);
-    const listDetailsOverlay = document.getElementById('list-details-overlay');
-    listDetailsOverlay.addEventListener('click', e => {
-        if (e.target === listDetailsOverlay) {
-            closeListDetails();
-        }
-    });
-    const fsBtn = document.getElementById('toggle-fullscreen');
-    if (fsBtn) fsBtn.addEventListener('click', toggleListFullscreen);
-    const completeBtn = document.getElementById('complete-list-button');
-    if (completeBtn) {
-        completeBtn.addEventListener('click', () => {
-            completeList(editingItemListId);
-        });
-    }
-    document.getElementById('save-item').addEventListener('click', saveItem);
-    document.getElementById('cancel-item-modal').addEventListener('click', closeItemModal);
-    // Tab navigation
-    document.getElementById('tab-lists').addEventListener('click', () => showPage('lists'));
-    document.getElementById('tab-summary').addEventListener('click', () => showPage('summary'));
-    document.getElementById('tab-items').addEventListener('click', () => showPage('items'));
-    document.getElementById('tab-archive').addEventListener('click', () => showPage('archive'));
-    document.getElementById('tab-settings').addEventListener('click', () => showPage('settings'));
-    // Language select
-    document.getElementById('language-select').addEventListener('change', (e) => {
-        currentLanguage = e.target.value;
-        localStorage.setItem('shoppingListLanguage', currentLanguage);
-        applyLanguage();
-    });
-    // Currency input to re-render summary on change
-    document.getElementById('default-currency').addEventListener('input', renderSummary);
-    // Receipt upload handler (displays file names only)
-    const receiptInput = document.getElementById('receipt-input');
-    if (receiptInput) {
-        receiptInput.addEventListener('change', async () => {
-            const listDiv = document.getElementById('receipt-list');
-            listDiv.innerHTML = '';
-            const files = Array.from(receiptInput.files);
-            for (const file of files) {
-                const reader = new FileReader();
-                // Wrap in promise to wait for load event
-                const dataUrl = await new Promise((resolve, reject) => {
-                    reader.onload = () => resolve(reader.result);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(file);
-                });
-                // Store receipt in data
-                data.receipts.push({ name: file.name, data: dataUrl });
-                // Display file name
-                const p = document.createElement('p');
-                p.textContent = file.name;
-                listDiv.appendChild(p);
-            }
-            saveData();
-            // Refresh displayed receipts
-            displayReceipts();
-        });
-    }
-
-    // Global items events
-    const addGlobalBtn = document.getElementById('add-global-item-button');
-    if (addGlobalBtn) {
-        addGlobalBtn.addEventListener('click', () => openGlobalItemModal());
-    }
-    const saveGlobalBtn = document.getElementById('save-global-item');
-    if (saveGlobalBtn) {
-        saveGlobalBtn.addEventListener('click', saveGlobalItem);
-    }
-    const cancelGlobalBtn = document.getElementById('cancel-global-item-modal');
-    if (cancelGlobalBtn) {
-        cancelGlobalBtn.addEventListener('click', closeGlobalItemModal);
-    }
-
-    // Import from Google Keep
-    const importBtn = document.getElementById('import-button');
-    if (importBtn) {
-        importBtn.addEventListener('click', importFromKeep);
-    }
-    // Export to CSV
-    const exportBtn = document.getElementById('export-csv-button');
-    if (exportBtn) {
-        exportBtn.addEventListener('click', exportToCSV);
-    }
-
-    // Clear all data for debugging
-    const clearDataBtn = document.getElementById('clear-data-button');
-    if (clearDataBtn) {
-        clearDataBtn.addEventListener('click', clearAllData);
-    }
-
-    // Add category button
-    const addCategoryBtn = document.getElementById('add-category-button');
-    if (addCategoryBtn) {
-        addCategoryBtn.addEventListener('click', addCategory);
-    }
-
-    // Search input for filtering items in list details
-    const searchInput = document.getElementById('item-search');
-    if (searchInput) {
-        searchInput.addEventListener('input', () => {
-            itemSearchTerm = searchInput.value;
-            const list = data.lists.find(l => l.id === editingItemListId);
-            if (list) renderItems(list);
-        });
-    }
-
-    // Auto-fill item info when selecting a global item name
-    const itemNameInput = document.getElementById('item-name-input');
-    if (itemNameInput) {
-        if (isMobile) {
-            itemNameInput.removeAttribute('list');
-        }
-        itemNameInput.addEventListener('input', handleItemNameInput);
-        document.addEventListener('click', (e) => {
-            const sug = document.getElementById('item-suggestions');
-            if (!sug || !itemNameInput) return;
-            if (!itemNameInput.contains(e.target) && !sug.contains(e.target)) {
-                sug.classList.add('hidden');
-            }
-        });
-    }
-}
-
-function showPage(page) {
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-    document.getElementById(`page-${page}`).classList.add('active');
-    document.getElementById(`tab-${page}`).classList.add('active');
-    if (page === 'summary') renderSummary();
-    if (page === 'items') renderGlobalItems();
-    if (page === 'archive') renderArchive();
-}
-
-// Initialization
-async function init() {
-    await loadData();
-    // Load language from storage
-    const storedLang = localStorage.getItem('shoppingListLanguage');
-    if (storedLang && translations[storedLang]) {
-        currentLanguage = storedLang;
-        document.getElementById('language-select').value = currentLanguage;
-    }
-    setupEvents();
-    applyLanguage();
-    renderLists();
-    renderSummary();
-    // Display existing receipts names if any
-    displayReceipts();
-    // Render global items and archive
-    renderGlobalItems();
-    renderCategories();
-
-    // If using a remote server for data persistence, connect to its
-    // WebSocket endpoint so that updates from other clients are pushed
-    // into this instance.  The DataService will set up a socket.io
-    // connection and call onRemoteDataUpdated() whenever data is updated.
-    if (window.DataService && window.DataService.useServer) {
-        window.DataService.initSocket();
-    }
-    const params = new URLSearchParams(window.location.search);
-    const linked = params.get('list');
-    if (linked) {
-        showPage('lists');
-        openListDetails(linked);
-    }
-}
-
-// Display list of uploaded receipts (names only) in summary page
-function displayReceipts() {
-    const listDiv = document.getElementById('receipt-list');
-    if (!listDiv) return;
-    listDiv.innerHTML = '';
-    (data.receipts || []).forEach(rec => {
-        const p = document.createElement('p');
-        p.textContent = rec.name;
-        listDiv.appendChild(p);
-    });
-}
-
-// Render archived purchases
-function renderArchive() {
-    const container = document.getElementById('archive-content');
-    if (!container) return;
-    container.innerHTML = '';
-    const t = translations[currentLanguage];
-    if (!data.archivedLists || data.archivedLists.length === 0) {
-        const p = document.createElement('p');
-        p.textContent = t.missing || 'No archives yet';
-        container.appendChild(p);
-        return;
-    }
-    const currency = document.getElementById('default-currency').value || '';
-    data.archivedLists.forEach(list => {
-        const section = document.createElement('div');
-        section.style.marginBottom = '1rem';
-        const heading = document.createElement('h3');
-        heading.textContent = list.name;
-        section.appendChild(heading);
-        // completion date
-        if (list.completedAt) {
-            const dateP = document.createElement('p');
-            dateP.textContent = new Date(list.completedAt).toLocaleDateString();
-            section.appendChild(dateP);
-        }
-        // totals: compute cost using actual or estimated price with basis
-        let totalActual = 0;
-        let totalEst = 0;
-        list.items.forEach(item => {
-            const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-            const basis = item.priceBasisQuantity || 1;
-            let actualCost = 0;
-            if (item.actualPrice != null) {
-                actualCost = item.actualPrice * (item.quantity / basis);
-            } else if (globalItem && globalItem.priceUnit === item.quantityUnit) {
-                actualCost = (globalItem.estimatedPrice || 0) * (item.quantity / basis);
-            }
-            totalActual += actualCost;
-            let estCost = 0;
-            if (globalItem && globalItem.priceUnit === item.quantityUnit) {
-                estCost = (globalItem.estimatedPrice || 0) * (item.quantity / basis);
-            }
-            totalEst += estCost;
-        });
-        const pTotal = document.createElement('p');
-        pTotal.textContent = `${t.total_cost}: ${currency}${totalActual.toFixed(2)}`;
-        section.appendChild(pTotal);
-        if (totalEst > 0) {
-            const diff = totalActual - totalEst;
-            const diffP = document.createElement('p');
-            diffP.style.fontSize = '0.8rem';
-            diffP.style.color = diff >= 0 ? 'red' : 'green';
-            const sign = diff >= 0 ? '+' : '-';
-            diffP.textContent = `Difference: ${sign}${currency}${Math.abs(diff).toFixed(2)}`;
-            section.appendChild(diffP);
-        }
-        // receipts (names)
-        if (list.receiptImages && list.receiptImages.length > 0) {
-            const receiptsDiv = document.createElement('div');
-            const recHeading = document.createElement('p');
-            recHeading.textContent = t.receipt_label;
-            receiptsDiv.appendChild(recHeading);
-            list.receiptImages.forEach(r => {
-                const pName = document.createElement('p');
-                pName.textContent = r.name || r;
-                receiptsDiv.appendChild(pName);
-            });
-            section.appendChild(receiptsDiv);
-        }
-        // View button to open archived list details for editing
-        const viewBtn = document.createElement('button');
-        viewBtn.className = 'btn btn-outline-secondary btn-sm';
-        viewBtn.innerHTML = '<i class="bi bi-eye"></i>';
-        viewBtn.title = t.archive_view;
-        viewBtn.addEventListener('click', () => {
-            openListDetails(list.id, true);
-        });
-        section.appendChild(viewBtn);
-        container.appendChild(section);
-    });
-}
-
-// Render categories in settings page
-function renderCategories() {
-    const container = document.getElementById('categories-container');
-    if (!container) return;
-    container.innerHTML = '';
-    data.categories.forEach(cat => {
-        const li = document.createElement('li');
-        li.style.display = 'flex';
-        li.style.justifyContent = 'space-between';
-        li.style.alignItems = 'center';
-        li.style.padding = '0.3rem 0';
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = cat.names[currentLanguage] || cat.names.en || cat.names.he || cat.id;
-        li.appendChild(nameSpan);
-        // Edit button for categories (rename names)
-        const renameBtn = document.createElement('button');
-        renameBtn.className = 'btn btn-outline-secondary btn-sm';
-        renameBtn.innerHTML = '<i class="bi bi-pencil"></i>';
-        renameBtn.title = translations[currentLanguage].rename_list;
-        renameBtn.addEventListener('click', () => {
-            // Prompt for new names in both languages
-            const newNameEn = prompt('New category name (English)', cat.names.en || '');
-            if (newNameEn == null) return;
-            const newNameHe = prompt('New category name (Hebrew)', cat.names.he || newNameEn);
-            if (newNameHe == null) return;
-            cat.names.en = newNameEn.trim() || cat.names.en;
-            cat.names.he = newNameHe.trim() || cat.names.he;
-            saveData();
-            renderCategories();
-            applyLanguage();
-        });
-        li.appendChild(renameBtn);
-        // Delete button for custom categories (not default ones)
-        if (!cat.id.startsWith('produce') && !cat.id.startsWith('dairy') && !cat.id.startsWith('meat') && !cat.id.startsWith('bakery') && !cat.id.startsWith('beverages') && cat.id !== 'other') {
-            const delBtn = document.createElement('button');
-            delBtn.className = 'btn btn-outline-danger btn-sm';
-            delBtn.innerHTML = '<i class="bi bi-trash"></i>';
-            delBtn.title = translations[currentLanguage].delete_list;
-            delBtn.addEventListener('click', () => {
-                if (confirm('Delete category?')) {
-                    // Remove category from data.categories
-                    data.categories = data.categories.filter(c => c.id !== cat.id);
-                    // Determine fallback category id (use 'other')
-                    const fallbackId = 'other';
-                    // Reassign items and global items using this category to fallback
-                    // Update all global items using this category to fallback
-                    data.globalItems.forEach(item => {
-                        if (item.categoryId === cat.id) item.categoryId = fallbackId;
-                    });
-                    // For backwards compatibility, update old list item categoryId fields
-                    data.lists.forEach(list => {
-                        list.items.forEach(item => {
-                            if (item.categoryId === cat.id) item.categoryId = fallbackId;
-                        });
-                    });
-                    data.archivedLists.forEach(list => {
-                        list.items.forEach(item => {
-                            if (item.categoryId === cat.id) item.categoryId = fallbackId;
-                        });
-                    });
-                    saveData();
-                    renderCategories();
-                    applyLanguage();
-                }
-            });
-            li.appendChild(delBtn);
-        }
-        container.appendChild(li);
-    });
-}
-
-function addCategory() {
-    const input = document.getElementById('new-category-input');
-    const name = input.value.trim();
-    if (!name) return;
-    // Create slug id
-    const id = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '') + '-' + Date.now();
-    const names = { en: name, he: name };
-    data.categories.push({ id, names });
-    input.value = '';
-    saveData();
-    renderCategories();
-    applyLanguage();
 }
 
 // Import lists from Google Keep note text
@@ -1560,7 +1087,7 @@ function importFromKeep() {
         let trimmed = contentLine.trim();
         if (!trimmed) return;
         // Match checkbox pattern [ ] or [X]
-        const match = trimmed.match(/^\[( |X|x)\]\s*(.*)$/);
+        const match = trimmed.match(/^\[([ X])\]\s*(.*)$/);
         if (!match) return;
         const checkedChar = match[1];
         let content = match[2].trim();
@@ -1575,20 +1102,20 @@ function importFromKeep() {
             return;
         }
         // Item line
-        let namePart = content;
+        let itemName = content;
         let notes = '';
         // Extract note after '-' character
-        const dashIndex = namePart.indexOf('-');
+        const dashIndex = itemName.indexOf('-');
         if (dashIndex >= 0) {
-            notes = namePart.slice(dashIndex + 1).trim();
-            namePart = namePart.slice(0, dashIndex).trim();
+            notes = itemName.slice(dashIndex + 1).trim();
+            itemName = itemName.slice(0, dashIndex).trim();
         }
         // Extract quantity and unit from patterns like "Bananas*4", "Bananas*4 kg" or "Bananas x4"
         let quantity = 1;
         let quantityUnit = 'piece';
-        const qtyMatch = namePart.match(/^(.*?)(?:[\*×x]\s*(\d+(?:\.\d+)?)(?:\s*(kg|liter|package|piece))?)$/i);
+        const qtyMatch = itemName.match(/^(.*?)[*×x]\s*(\d+(?:\.\d+)?)(?:\s*(kg|liter|package|piece))?$/i);
         if (qtyMatch) {
-            namePart = qtyMatch[1].trim();
+            itemName = qtyMatch[1].trim();
             quantity = parseFloat(qtyMatch[2]);
             if (qtyMatch[3]) quantityUnit = qtyMatch[3].toLowerCase();
         }
@@ -1601,7 +1128,7 @@ function importFromKeep() {
             categoryObj = { id, names: { en: categoryName, he: categoryName } };
             data.categories.push(categoryObj);
         }
-        const globalName = namePart.trim();
+        const globalName = itemName.trim();
         if (!globalName) return;
         // Find or create global item
         let globalItem = data.globalItems.find(g => g.name.toLowerCase() === globalName.toLowerCase() && g.categoryId === categoryObj.id);
@@ -1772,40 +1299,577 @@ function completeList(listId) {
     closeListDetails();
 }
 
-// Run init on DOM ready
-document.addEventListener('DOMContentLoaded', init);
+// Presence and collaboration features
+function showPresenceIndicators() {
+    // Add connected users indicator to header
+    let presenceIndicator = document.getElementById('presence-indicator');
+    if (!presenceIndicator) {
+        presenceIndicator = document.createElement('div');
+        presenceIndicator.id = 'presence-indicator';
+        presenceIndicator.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: white;
+            font-size: 0.8rem;
+        `;
 
-// Callback for remote data updates via WebSocket
-// When the DataService receives a `dataUpdated` event from the server,
-// it will call this function (if defined).  We merge the remote data
-// into the local state and then re-render the UI to reflect the change.
-window.onRemoteDataUpdated = function(remoteData) {
-    if (!remoteData || typeof remoteData !== 'object') return;
-    data = remoteData;
-    data.lists = data.lists || [];
-    data.globalItems = data.globalItems || [];
-    data.categories = data.categories || [];
-    data.archivedLists = data.archivedLists || [];
-    data.receipts = data.receipts || [];
-    lastSavedData = clone(data);
-    undoStack = [];
-    redoStack = [];
-    // DataService.initSocket() already persisted the remote data to
-    // localStorage when it received the event. Avoid saving again here
-    // to prevent an update loop that would broadcast the data back to
-    // the server and trigger another 'dataUpdated' event.
-    // Update UI
-    renderLists();
-    renderSummary();
-    renderGlobalItems();
-    renderArchive();
-    renderCategories();
-    updateGlobalItemSuggestions();
-    if (editingItemListId) {
-        const listArr = editingArchive ? data.archivedLists : data.lists;
-        const current = listArr.find(l => l.id === editingItemListId);
-        if (current) {
-            renderItems(current);
+        const header = document.querySelector('header');
+        const languageToggle = document.querySelector('.language-toggle');
+        header.insertBefore(presenceIndicator, languageToggle);
+    }
+
+    const onlineCount = connectedUsers.length;
+
+    presenceIndicator.innerHTML = `
+        <i class="bi bi-people"></i>
+        <span>${onlineCount} ${onlineCount === 1 ? 'user' : 'users'} online</span>
+        ${window.DataService?.isConnected ? '<i class="bi bi-wifi" style="color: #4caf50;"></i>' : '<i class="bi bi-wifi-off" style="color: #f44336;"></i>'}
+    `;
+}
+
+function showEditingIndicators(listId, itemId = null) {
+    const key = itemId ? `${listId}/${itemId}` : listId;
+    const editor = activeEditors[key];
+
+    if (editor && editor.clientId !== window.DataService.clientId) {
+        // Show indicator that someone else is editing
+        showEditingBadge(editor.userId, listId, itemId);
+    }
+}
+
+function showEditingBadge(userName, listId, itemId = null) {
+    const targetSelector = itemId ?
+        `[data-item-id="${itemId}"]` :
+        `[data-list-id="${listId}"]`;
+
+    const target = document.querySelector(targetSelector);
+    if (target && !target.querySelector('.editing-badge')) {
+        const badge = document.createElement('span');
+        badge.className = 'editing-badge';
+        badge.style.cssText = `
+            background: #2196f3;
+            color: white;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 0.5rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        `;
+        badge.innerHTML = `<i class="bi bi-pencil"></i>${userName}`;
+        target.appendChild(badge);
+    }
+}
+
+function clearEditingBadges(listId = null, itemId = null) {
+    if (listId && itemId) {
+        const target = document.querySelector(`[data-item-id="${itemId}"]`);
+        const badge = target?.querySelector('.editing-badge');
+        badge?.remove();
+    } else if (listId) {
+        const target = document.querySelector(`[data-list-id="${listId}"]`);
+        const badge = target?.querySelector('.editing-badge');
+        badge?.remove();
+    } else {
+        document.querySelectorAll('.editing-badge').forEach(badge => badge.remove());
+    }
+}
+
+// Enhanced conflict resolution UI
+function showConflictResolutionModal(conflicts, mergedData, originalData) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        `;
+
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        `;
+
+        modal.innerHTML = `
+            <h3>Resolve Conflicts</h3>
+            <p>Your changes conflict with recent updates from other users. Please choose how to resolve:</p>
+            <div id="conflict-list"></div>
+            <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                <button id="accept-merged" class="btn btn-primary">Accept Merged Version</button>
+                <button id="keep-mine" class="btn btn-secondary">Keep My Changes</button>
+                <button id="manual-resolve" class="btn btn-outline-primary">Manual Review</button>
+            </div>
+        `;
+
+        const conflictList = modal.querySelector('#conflict-list');
+        conflicts.forEach(conflict => {
+            const conflictDiv = document.createElement('div');
+            conflictDiv.style.cssText = `
+                border: 1px solid #ddd;
+                padding: 1rem;
+                margin: 1rem 0;
+                border-radius: 4px;
+            `;
+
+            if (conflict.type === 'list_conflict') {
+                conflictDiv.innerHTML = `
+                    <h4>List: ${conflict.serverVersion.name}</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div>
+                            <strong>Server Version:</strong>
+                            <div style="background: #f0f8ff; padding: 0.5rem; border-radius: 4px;">
+                                ${conflict.serverVersion.name} (${conflict.serverVersion.items?.length || 0} items)
+                            </div>
+                        </div>
+                        <div>
+                            <strong>Your Version:</strong>
+                            <div style="background: #fff8dc; padding: 0.5rem; border-radius: 4px;">
+                                ${conflict.localVersion.name} (${conflict.localVersion.items?.length || 0} items)
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            conflictList.appendChild(conflictDiv);
+        });
+
+        modal.querySelector('#accept-merged').addEventListener('click', () => {
+            overlay.remove();
+            resolve(mergedData);
+        });
+
+        modal.querySelector('#keep-mine').addEventListener('click', () => {
+            overlay.remove();
+            resolve(originalData);
+        });
+
+        modal.querySelector('#manual-resolve').addEventListener('click', () => {
+            overlay.remove();
+            resolve(null); // Let user manually resolve
+        });
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    });
+}
+
+// Add real-time operation handlers
+window.onRemoteOperationsApplied = function(operations) {
+    // Handle batch operations from other clients
+    console.log('Remote operations applied:', operations);
+
+    // Show subtle notification
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #4caf50;
+        color: white;
+        padding: 8px 16px;
+        border-radius: 4px;
+        z-index: 9999;
+        font-size: 0.8rem;
+        opacity: 0.9;
+    `;
+    notification.textContent = `${operations.length} updates from other users`;
+    document.body.appendChild(notification);
+
+    setTimeout(() => notification.remove(), 3000);
+};
+
+window.onRemoteOperationReceived = function(operation) {
+    // Handle single real-time operation
+    console.log('Real-time operation received:', operation);
+
+    // Apply operation locally for instant feedback
+    // This would require implementing operation transforms on the client side
+    // For now, we'll just refresh the affected UI components
+
+    if (operation.path.startsWith('lists/')) {
+        renderLists();
+        if (isEditing && currentEditingContext) {
+            const list = data.lists.find(l => l.id === currentEditingContext.listId);
+            if (list) renderItems(list);
         }
     }
 };
+
+// Enhanced beforeunload handler for presence cleanup
+window.addEventListener('beforeunload', () => {
+    if (currentEditingContext) {
+        window.DataService.updatePresence('editEnd', currentEditingContext.listId, editingItemId);
+    }
+    window.DataService.updatePresence('disconnect');
+});
+
+// Enhanced visibility change handler for better presence tracking
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        window.DataService.updatePresence('active');
+        showPresenceIndicators();
+    } else {
+        window.DataService.updatePresence('idle');
+    }
+});
+
+// Enhanced setupEvents function with collaboration features
+function setupEvents() {
+    // Language selection
+    document.getElementById('language-select').addEventListener('change', (e) => {
+        currentLanguage = e.target.value;
+        localStorage.setItem('shopping-list-language', currentLanguage);
+        applyLanguage();
+    });
+
+    // Load saved language preference
+    const savedLang = localStorage.getItem('shopping-list-language');
+    if (savedLang && translations[savedLang]) {
+        currentLanguage = savedLang;
+        document.getElementById('language-select').value = currentLanguage;
+    }
+
+    // Tab navigation
+    document.getElementById('tab-lists').addEventListener('click', () => showPage('lists'));
+    document.getElementById('tab-summary').addEventListener('click', () => showPage('summary'));
+    document.getElementById('tab-items').addEventListener('click', () => showPage('items'));
+    document.getElementById('tab-archive').addEventListener('click', () => showPage('archive'));
+    document.getElementById('tab-settings').addEventListener('click', () => showPage('settings'));
+
+    // List management
+    document.getElementById('add-list-button').addEventListener('click', () => openListModal());
+    document.getElementById('save-list').addEventListener('click', saveList);
+    document.getElementById('cancel-modal').addEventListener('click', closeListModal);
+
+    // Item management
+    document.getElementById('add-item-button').addEventListener('click', () => {
+        if (editingItemListId) {
+            openItemModal(editingItemListId);
+        }
+    });
+    document.getElementById('save-item').addEventListener('click', saveItem);
+    document.getElementById('cancel-item-modal').addEventListener('click', closeItemModal);
+
+    // List details management
+    document.getElementById('close-list-details').addEventListener('click', closeListDetails);
+    document.getElementById('complete-list-button').addEventListener('click', () => {
+        if (editingItemListId) {
+            completeList(editingItemListId);
+        }
+    });
+
+    // Undo/Redo functionality
+    document.getElementById('undo-button').addEventListener('click', undo);
+    document.getElementById('redo-button').addEventListener('click', redo);
+
+    // Fullscreen toggle
+    document.getElementById('toggle-fullscreen').addEventListener('click', toggleListFullscreen);
+
+    // Global item management
+    document.getElementById('add-global-item-button').addEventListener('click', () => openGlobalItemModal());
+    document.getElementById('save-global-item').addEventListener('click', saveGlobalItem);
+    document.getElementById('cancel-global-item-modal').addEventListener('click', closeGlobalItemModal);
+
+    // Settings and categories
+    document.getElementById('add-category-button').addEventListener('click', addCategory);
+    document.getElementById('new-category-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            addCategory();
+        }
+    });
+
+    // Import/Export functionality
+    document.getElementById('import-button').addEventListener('click', importFromKeep);
+    document.getElementById('export-csv-button').addEventListener('click', exportToCSV);
+
+    // Clear data functionality
+    document.getElementById('clear-data-button').addEventListener('click', clearAllData);
+
+    // Item search functionality
+    const searchInput = document.getElementById('item-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            itemSearchTerm = e.target.value;
+            if (editingItemListId) {
+                const list = (editingArchive ? data.archivedLists : data.lists).find(l => l.id === editingItemListId);
+                if (list) renderItems(list);
+            }
+        });
+    }
+
+    // Item name input with autocomplete
+    const itemNameInput = document.getElementById('item-name-input');
+    if (itemNameInput) {
+        itemNameInput.addEventListener('input', handleItemNameInput);
+        itemNameInput.addEventListener('focus', handleItemNameInput);
+        itemNameInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                const suggestions = document.getElementById('item-suggestions');
+                if (suggestions) suggestions.classList.add('hidden');
+            }, 200);
+        });
+    }
+
+    // Receipt upload handling
+    const receiptInput = document.getElementById('receipt-input');
+    if (receiptInput) {
+        receiptInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            files.forEach(file => {
+                data.receipts = data.receipts || [];
+                data.receipts.push({ name: file.name, size: file.size, type: file.type });
+            });
+            saveData();
+            displayReceipts();
+        });
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        // Only handle shortcuts when not in input fields
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        if (e.ctrlKey || e.metaKey) {
+            switch (e.key) {
+                case 'z':
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                        redo();
+                    } else {
+                        undo();
+                    }
+                    break;
+                case 'n':
+                    e.preventDefault();
+                    if (document.getElementById('page-lists').classList.contains('active')) {
+                        openListModal();
+                    } else if (document.getElementById('page-items').classList.contains('active')) {
+                        openGlobalItemModal();
+                    }
+                    break;
+                case 'f':
+                    e.preventDefault();
+                    if (!document.getElementById('list-details-overlay').classList.contains('hidden')) {
+                        toggleListFullscreen();
+                    }
+                    break;
+            }
+        }
+
+        // ESC key to close modals
+        if (e.key === 'Escape') {
+            if (!document.getElementById('modal-overlay').classList.contains('hidden')) {
+                closeListModal();
+            } else if (!document.getElementById('item-modal-overlay').classList.contains('hidden')) {
+                closeItemModal();
+            } else if (!document.getElementById('global-item-modal-overlay').classList.contains('hidden')) {
+                closeGlobalItemModal();
+            } else if (!document.getElementById('list-details-overlay').classList.contains('hidden')) {
+                closeListDetails();
+            }
+        }
+    });
+
+    // Enhanced modal handling with enter key support
+    document.getElementById('list-name-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            saveList();
+        }
+    });
+
+    // Prevent form submission on enter in item modal inputs
+    ['item-name-input', 'item-quantity-input', 'item-price-input', 'item-price-basis-input'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    saveItem();
+                }
+            });
+        }
+    });
+
+    // Global item modal enter key support
+    ['global-name-input', 'global-price-input'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    saveGlobalItem();
+                }
+            });
+        }
+    });
+
+    // Enhanced presence tracking
+    setupPresenceTracking();
+
+    // Enhanced error handling for collaboration
+    setupCollaborationErrorHandling();
+}
+
+function setupPresenceTracking() {
+    // Track user activity for presence
+    let activityTimer;
+
+    const updateActivity = () => {
+        if (window.DataService && window.DataService.isConnected) {
+            window.DataService.updatePresence('active');
+        }
+
+        clearTimeout(activityTimer);
+        activityTimer = setTimeout(() => {
+            if (window.DataService && window.DataService.isConnected) {
+                window.DataService.updatePresence('idle');
+            }
+        }, 5 * 60 * 1000); // 5 minutes idle timeout
+    };
+
+    // Track various user activities
+    ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(event => {
+        document.addEventListener(event, updateActivity, true);
+    });
+
+    // Initial activity
+    updateActivity();
+}
+
+function setupCollaborationErrorHandling() {
+    // Handle network errors gracefully
+    window.addEventListener('online', () => {
+        console.log('Connection restored');
+        if (window.DataService && !window.DataService.isConnected) {
+            window.DataService.scheduleReconnect();
+        }
+        showConnectionStatus('online');
+    });
+
+    window.addEventListener('offline', () => {
+        console.log('Connection lost');
+        showConnectionStatus('offline');
+    });
+
+    // Enhanced error recovery
+    window.addEventListener('unhandledrejection', (event) => {
+        console.error('Unhandled promise rejection:', event.reason);
+
+        // Handle specific collaboration errors
+        if (event.reason && event.reason.message) {
+            if (event.reason.message.includes('conflict') || event.reason.message.includes('revision')) {
+                showConflictNotification('A conflict was detected and resolved automatically.');
+            } else if (event.reason.message.includes('network') || event.reason.message.includes('fetch')) {
+                showConnectionStatus('error');
+            }
+        }
+    });
+}
+
+function showConnectionStatus(status) {
+    // Remove existing status indicators
+    const existing = document.querySelector('.connection-status');
+    if (existing) existing.remove();
+
+    const indicator = document.createElement('div');
+    indicator.className = 'connection-status';
+    indicator.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    `;
+
+    switch (status) {
+        case 'online':
+            indicator.style.background = '#4caf50';
+            indicator.style.color = 'white';
+            indicator.innerHTML = '<i class="bi bi-wifi"></i>Connected';
+            break;
+        case 'offline':
+            indicator.style.background = '#f44336';
+            indicator.style.color = 'white';
+            indicator.innerHTML = '<i class="bi bi-wifi-off"></i>Offline - Changes saved locally';
+            break;
+        case 'error':
+            indicator.style.background = '#ff9800';
+            indicator.style.color = 'white';
+            indicator.innerHTML = '<i class="bi bi-exclamation-triangle"></i>Connection issues - Retrying...';
+            break;
+    }
+
+    document.body.appendChild(indicator);
+
+    // Auto-remove after delay
+    setTimeout(() => {
+        if (indicator.parentNode) {
+            indicator.remove();
+        }
+    }, status === 'offline' ? 10000 : 5000);
+}
+
+function showConflictNotification(message) {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #ff9800, #f57c00);
+        color: white;
+        padding: 16px 20px;
+        border-radius: 8px;
+        z-index: 10000;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        max-width: 350px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    notification.innerHTML = `
+        <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <div style="flex-shrink: 0; font-size: 20px;">⚠️</div>
+            <div style="flex: 1;">
+                <div style="font-weight: 600; margin-bottom: 4px;">Collaboration Update</div>
+                <div style="font-size: 14px; opacity: 0.9; line-height: 1.4;">
+                    ${message}
+                </div>
+                <button onclick="this.parentElement.parentElement.parentElement.remove()" 
+                        style="margin-top: 8px; background: rgba(255,255,255,0.2); border: none; color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                    Dismiss
+                </button>
+            </div>
+            <button onclick="this.parentElement.parentElement.remove()" 
+                    style="background: none; border: none; color: white; cursor: pointer; font-size: 18px; line-height: 1;">×</button>
+        </div>
+    `;
+
+    document.body.appendChild(notification);
+
+    // Auto-dismiss after 8 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 8000);
+}
+
