@@ -317,7 +317,10 @@ function applyLanguage() {
         clearBtn.innerText = t.clear_data;
     }
     document.getElementById('lists-title').innerText = t.lists_title;
-    document.getElementById('add-list-button').innerText = t.add_list;
+    const addListBtn = document.getElementById('add-list-button');
+    addListBtn.innerHTML = '<i class="bi bi-plus-lg"></i>';
+    addListBtn.title = t.add_list;
+    addListBtn.classList.add('btn', 'btn-primary', 'btn-sm');
     document.getElementById('summary-title').innerText = t.summary_title;
     document.getElementById('items-title').innerText = t.items_title;
     document.getElementById('archive-title').innerText = t.archive_title;
@@ -339,13 +342,20 @@ function applyLanguage() {
         document.getElementById('global-unit-label').innerText = t.global_unit;
         document.getElementById('save-global-item').innerText = t.save;
         document.getElementById('cancel-global-item-modal').innerText = t.cancel;
-        document.getElementById('add-global-item-button').innerText = t.add_global_item;
+        const addGlobalBtn = document.getElementById('add-global-item-button');
+        addGlobalBtn.innerHTML = '<i class="bi bi-plus-lg"></i>';
+        addGlobalBtn.title = t.add_global_item;
+        addGlobalBtn.classList.add('btn', 'btn-primary', 'btn-sm');
     }
     // Categories section
     const categoriesTitleEl = document.getElementById('categories-title');
     if (categoriesTitleEl) categoriesTitleEl.innerText = t.categories_title;
     const addCategoryBtn = document.getElementById('add-category-button');
-    if (addCategoryBtn) addCategoryBtn.innerText = t.add_category;
+    if (addCategoryBtn) {
+        addCategoryBtn.innerHTML = '<i class="bi bi-plus-lg"></i>';
+        addCategoryBtn.title = t.add_category;
+        addCategoryBtn.classList.add('btn', 'btn-primary', 'btn-sm');
+    }
     // Render categories names to update language
     renderCategories();
     // Modal texts
@@ -365,12 +375,26 @@ function applyLanguage() {
     if (priceBasisLabel) priceBasisLabel.innerText = t.item_price_basis;
     document.getElementById('save-item').innerText = t.save;
     document.getElementById('cancel-item-modal').innerText = t.cancel;
-    document.getElementById('add-item-button').innerText = t.add_item;
+    const addItemBtn = document.getElementById('add-item-button');
+    addItemBtn.innerHTML = '<i class="bi bi-plus-lg"></i>';
+    addItemBtn.title = t.add_item;
+    addItemBtn.className = 'btn btn-primary btn-sm';
     const completeBtn = document.getElementById('complete-list-button');
-    if (completeBtn) completeBtn.innerText = t.complete_list;
-    document.getElementById('close-list-details').innerText = t.close;
+    if (completeBtn) {
+        completeBtn.innerHTML = '<i class="bi bi-check2-circle"></i>';
+        completeBtn.title = t.complete_list;
+        completeBtn.className = 'btn btn-success btn-sm';
+    }
+    const closeBtn = document.getElementById('close-list-details');
+    closeBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
+    closeBtn.title = t.close;
+    closeBtn.className = 'btn btn-secondary btn-sm';
     const fsBtn = document.getElementById('toggle-fullscreen');
-    if (fsBtn) fsBtn.innerText = listFullscreen ? t.restore : t.maximize;
+    if (fsBtn) {
+        fsBtn.innerHTML = listFullscreen ? '<i class="bi bi-fullscreen-exit"></i>' : '<i class="bi bi-fullscreen"></i>';
+        fsBtn.title = listFullscreen ? t.restore : t.maximize;
+        fsBtn.className = 'btn btn-secondary btn-sm';
+    }
     const checkedHeading = document.getElementById('checked-heading');
     if (checkedHeading) checkedHeading.innerText = t.purchased;
     // Populate categories select for list items using data.categories
@@ -412,10 +436,11 @@ function renderLists() {
     container.innerHTML = '';
     data.lists.forEach(list => {
         const li = document.createElement('li');
+        li.className = 'list-group-item d-flex align-items-start justify-content-between gap-2';
         const t = translations[currentLanguage];
         // List name and stats
         const info = document.createElement('div');
-        info.style.flex = '1';
+        info.className = 'flex-grow-1';
         const nameSpan = document.createElement('strong');
         nameSpan.textContent = list.name;
         info.appendChild(nameSpan);
@@ -423,34 +448,43 @@ function renderLists() {
         const total = list.items.length;
         const purchased = list.items.filter(i => i.isChecked).length;
         const stats = document.createElement('div');
-        stats.style.fontSize = '0.8rem';
-        stats.style.marginTop = '0.25rem';
+        stats.className = 'small text-muted';
         stats.textContent = `${t.purchased}: ${purchased}/${total}`;
         info.appendChild(stats);
         li.appendChild(info);
+        const btnGroup = document.createElement('div');
+        btnGroup.className = 'btn-group btn-group-sm';
         // Manage Items button
         const manageBtn = document.createElement('button');
-        manageBtn.textContent = t.manage_items;
+        manageBtn.className = 'btn btn-outline-primary';
+        manageBtn.innerHTML = '<i class="bi bi-list-task"></i>';
+        manageBtn.title = t.manage_items;
         manageBtn.addEventListener('click', () => openListDetails(list.id));
-        li.appendChild(manageBtn);
+        btnGroup.appendChild(manageBtn);
         // Rename button
         const renameBtn = document.createElement('button');
-        renameBtn.textContent = t.rename_list;
+        renameBtn.className = 'btn btn-outline-secondary';
+        renameBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+        renameBtn.title = t.rename_list;
         renameBtn.addEventListener('click', () => openListModal(list.id));
-        li.appendChild(renameBtn);
+        btnGroup.appendChild(renameBtn);
         // Share link button
         const linkBtn = document.createElement('button');
-        linkBtn.textContent = t.share_link;
+        linkBtn.className = 'btn btn-outline-secondary';
+        linkBtn.innerHTML = '<i class="bi bi-link-45deg"></i>';
+        linkBtn.title = t.share_link;
         linkBtn.addEventListener('click', () => {
             const url = new URL(window.location);
             url.searchParams.set('list', list.id);
             navigator.clipboard.writeText(url.toString());
             alert(t.share_link);
         });
-        li.appendChild(linkBtn);
+        btnGroup.appendChild(linkBtn);
         // Delete button
         const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = t.delete_list;
+        deleteBtn.className = 'btn btn-outline-danger';
+        deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+        deleteBtn.title = t.delete_list;
         deleteBtn.addEventListener('click', () => {
             if (confirm('Delete list?')) {
                 data.lists = data.lists.filter(l => l.id !== list.id);
@@ -459,7 +493,8 @@ function renderLists() {
                 renderSummary();
             }
         });
-        li.appendChild(deleteBtn);
+        btnGroup.appendChild(deleteBtn);
+        li.appendChild(btnGroup);
         container.appendChild(li);
     });
 }
@@ -523,7 +558,9 @@ function renderSummary() {
         // Button to create new list with missing items
         if (itemsMissing.length > 0) {
             const createBtn = document.createElement('button');
-            createBtn.textContent = t.create_from_missing;
+            createBtn.className = 'btn btn-outline-primary btn-sm';
+            createBtn.innerHTML = '<i class="bi bi-plus-lg"></i>';
+            createBtn.title = t.create_from_missing;
             createBtn.addEventListener('click', () => {
                 const newList = {
                     id: 'list-' + Date.now(),
@@ -579,12 +616,16 @@ function renderGlobalItems() {
         li.appendChild(info);
         // Edit button
         const editBtn = document.createElement('button');
-        editBtn.textContent = t.edit_global_item;
+        editBtn.className = 'btn btn-outline-secondary btn-sm';
+        editBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+        editBtn.title = t.edit_global_item;
         editBtn.addEventListener('click', () => openGlobalItemModal(item.id));
         li.appendChild(editBtn);
         // Delete button
         const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = t.delete_list;
+        deleteBtn.className = 'btn btn-outline-danger btn-sm';
+        deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+        deleteBtn.title = t.delete_list;
         deleteBtn.addEventListener('click', () => {
             if (confirm('Delete global item?')) {
                 data.globalItems = data.globalItems.filter(g => g.id !== item.id);
@@ -825,9 +866,10 @@ function renderItems(list) {
         const checked = items.filter(i => i.isChecked);
         const renderSection = (target, arr) => {
             const heading = document.createElement('div');
-            heading.className = 'category-heading';
+            heading.className = 'category-heading d-flex align-items-center gap-2';
             const collapseBtn = document.createElement('button');
-            collapseBtn.textContent = collapsedCategories[catId] ? '▶' : '▼';
+            collapseBtn.className = 'btn btn-sm btn-outline-secondary';
+            collapseBtn.innerHTML = collapsedCategories[catId] ? '<i class="bi bi-chevron-right"></i>' : '<i class="bi bi-chevron-down"></i>';
             collapseBtn.addEventListener('click', () => {
                 collapsedCategories[catId] = !collapsedCategories[catId];
                 localStorage.setItem('collapsedCategories', JSON.stringify(collapsedCategories));
@@ -839,25 +881,30 @@ function renderItems(list) {
             heading.appendChild(span);
             const checkBox = document.createElement('input');
             checkBox.type = 'checkbox';
+            checkBox.className = 'form-check-input ms-2';
             checkBox.checked = arr.length > 0 && arr.every(i => i.isChecked);
             checkBox.addEventListener('change', () => {
                 setCategoryChecked(list, catId, checkBox.checked);
             });
             heading.appendChild(checkBox);
             const upBtn = document.createElement('button');
-            upBtn.textContent = '↑';
+            upBtn.className = 'btn btn-sm btn-outline-secondary';
+            upBtn.innerHTML = '<i class="bi bi-chevron-up"></i>';
             upBtn.addEventListener('click', () => moveCategory(catId, -1, list));
             heading.appendChild(upBtn);
             const downBtn = document.createElement('button');
-            downBtn.textContent = '↓';
+            downBtn.className = 'btn btn-sm btn-outline-secondary';
+            downBtn.innerHTML = '<i class="bi bi-chevron-down"></i>';
             downBtn.addEventListener('click', () => moveCategory(catId, 1, list));
             heading.appendChild(downBtn);
             target.appendChild(heading);
             if (!collapsedCategories[catId]) {
                 arr.forEach(item => {
                     const li = document.createElement('li');
+                    li.className = 'list-group-item d-flex align-items-start gap-2';
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
+                    checkbox.className = 'form-check-input mt-1';
                     checkbox.checked = item.isChecked;
                     checkbox.addEventListener('change', async () => {
                         item.isChecked = checkbox.checked;
@@ -868,8 +915,7 @@ function renderItems(list) {
                     });
                     li.appendChild(checkbox);
                     const info = document.createElement('span');
-                    info.style.flex = '1';
-                    info.style.marginLeft = '0.5rem';
+                    info.className = 'item-text flex-grow-1';
                     info.style.textDecoration = item.isChecked ? 'line-through' : 'none';
                     const currency = document.getElementById('default-currency').value || '';
                     const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
@@ -895,20 +941,28 @@ function renderItems(list) {
                     }
                     info.textContent = text;
                     li.appendChild(info);
+                    const btnGroup = document.createElement('div');
+                    btnGroup.className = 'btn-group btn-group-sm';
                     const up = document.createElement('button');
-                    up.textContent = '↑';
+                    up.className = 'btn btn-outline-secondary';
+                    up.innerHTML = '<i class="bi bi-chevron-up"></i>';
                     up.addEventListener('click', () => moveItem(list, item.id, -1));
-                    li.appendChild(up);
+                    btnGroup.appendChild(up);
                     const down = document.createElement('button');
-                    down.textContent = '↓';
+                    down.className = 'btn btn-outline-secondary';
+                    down.innerHTML = '<i class="bi bi-chevron-down"></i>';
                     down.addEventListener('click', () => moveItem(list, item.id, 1));
-                    li.appendChild(down);
+                    btnGroup.appendChild(down);
                     const editBtn = document.createElement('button');
-                    editBtn.textContent = t.rename_list;
+                    editBtn.className = 'btn btn-outline-secondary';
+                    editBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+                    editBtn.title = t.rename_list;
                     editBtn.addEventListener('click', () => openItemModal(list.id, item.id));
-                    li.appendChild(editBtn);
+                    btnGroup.appendChild(editBtn);
                     const deleteBtn = document.createElement('button');
-                    deleteBtn.textContent = t.delete_list;
+                    deleteBtn.className = 'btn btn-outline-danger';
+                    deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+                    deleteBtn.title = t.delete_list;
                     deleteBtn.addEventListener('click', () => {
                         const index = list.items.findIndex(i => i.id === item.id);
                         if (index >= 0) {
@@ -919,7 +973,8 @@ function renderItems(list) {
                             renderSummary();
                         }
                     });
-                    li.appendChild(deleteBtn);
+                    btnGroup.appendChild(deleteBtn);
+                    li.appendChild(btnGroup);
                     target.appendChild(li);
                 });
             }
@@ -1350,7 +1405,9 @@ function renderArchive() {
         }
         // View button to open archived list details for editing
         const viewBtn = document.createElement('button');
-        viewBtn.textContent = t.archive_view;
+        viewBtn.className = 'btn btn-outline-secondary btn-sm';
+        viewBtn.innerHTML = '<i class="bi bi-eye"></i>';
+        viewBtn.title = t.archive_view;
         viewBtn.addEventListener('click', () => {
             openListDetails(list.id, true);
         });
@@ -1375,7 +1432,9 @@ function renderCategories() {
         li.appendChild(nameSpan);
         // Edit button for categories (rename names)
         const renameBtn = document.createElement('button');
-        renameBtn.textContent = translations[currentLanguage].rename_list;
+        renameBtn.className = 'btn btn-outline-secondary btn-sm';
+        renameBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+        renameBtn.title = translations[currentLanguage].rename_list;
         renameBtn.addEventListener('click', () => {
             // Prompt for new names in both languages
             const newNameEn = prompt('New category name (English)', cat.names.en || '');
@@ -1392,7 +1451,9 @@ function renderCategories() {
         // Delete button for custom categories (not default ones)
         if (!cat.id.startsWith('produce') && !cat.id.startsWith('dairy') && !cat.id.startsWith('meat') && !cat.id.startsWith('bakery') && !cat.id.startsWith('beverages') && cat.id !== 'other') {
             const delBtn = document.createElement('button');
-            delBtn.textContent = translations[currentLanguage].delete_list;
+            delBtn.className = 'btn btn-outline-danger btn-sm';
+            delBtn.innerHTML = '<i class="bi bi-trash"></i>';
+            delBtn.title = translations[currentLanguage].delete_list;
             delBtn.addEventListener('click', () => {
                 if (confirm('Delete category?')) {
                     // Remove category from data.categories
