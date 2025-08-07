@@ -532,12 +532,7 @@ function renderLists() {
         linkBtn.className = 'btn btn-outline-secondary';
         linkBtn.innerHTML = '<i class="bi bi-link-45deg"></i>';
         linkBtn.title = t.share_link;
-        linkBtn.addEventListener('click', () => {
-            const url = new URL(window.location);
-            url.searchParams.set('list', list.id);
-            navigator.clipboard.writeText(url.toString());
-            alert(t.share_link);
-        });
+        linkBtn.addEventListener('click', () => shareList(list.id));
         btnGroup.appendChild(linkBtn);
         // Delete button
         const deleteBtn = document.createElement('button');
@@ -753,7 +748,23 @@ function saveGlobalItem() {
     const categoryId = document.getElementById('global-category-select').value;
     const price = parseFloat(document.getElementById('global-price-input').value) || 0;
     const unit = document.getElementById('global-unit-select').value;
-    if (!itemName) return;
+
+    if (!itemName) {
+        showUpdateNotification('Item name is required', 'error');
+        return;
+    }
+
+    // Check for duplicate names (case-insensitive)
+    const existingItem = data.globalItems.find(g =>
+        g.id !== editingGlobalItemId &&
+        g.name.toLowerCase() === itemName.toLowerCase()
+    );
+
+    if (existingItem) {
+        showUpdateNotification('An item with this name already exists', 'error');
+        return;
+    }
+
     if (editingGlobalItemId) {
         const item = data.globalItems.find(g => g.id === editingGlobalItemId);
         if (item) {
@@ -761,10 +772,11 @@ function saveGlobalItem() {
             item.categoryId = categoryId;
             item.estimatedPrice = price;
             item.priceUnit = unit;
+            item.updatedAt = new Date().toISOString();
         }
     } else {
         const newItem = {
-            id: 'global-' + Date.now(),
+            id: 'global-' + Date.now() + '-' + Math.random().toString(36).slice(2),
             name: itemName,
             categoryId,
             estimatedPrice: price,
@@ -774,10 +786,24 @@ function saveGlobalItem() {
         };
         data.globalItems.push(newItem);
     }
-    saveData();
+
+    saveData(true, editingGlobalItemId ? 'update' : 'create',
+        editingGlobalItemId ? `globalItems/${editingGlobalItemId}` : 'globalItems',
+        editingGlobalItemId ? data.globalItems.find(g => g.id === editingGlobalItemId) : data.globalItems[data.globalItems.length - 1]
+    );
+
     renderGlobalItems();
     updateGlobalItemSuggestions();
+    updateCategoryDropdowns();
     closeGlobalItemModal();
+
+    showUpdateNotification(
+        editingGlobalItemId ? `Updated item "${itemName}"` : `Created item "${itemName}"`,
+        'success'
+    );
+
+    // Reset editing state
+    editingGlobalItemId = null;
 }
 
 // Open list creation/edit modal
@@ -805,15 +831,37 @@ function closeListModal() {
 function saveList() {
     const listName = document.getElementById('list-name-input').value.trim();
     if (!listName) return;
+
     if (editingListId) {
         // Edit existing
         const list = data.lists.find(l => l.id === editingListId);
-        if (list) list.name = listName;
+        if (list) {
+            const oldName = list.name;
+            list.name = listName;
+            list.updatedAt = new Date().toISOString();
+
+            // Track the operation for collaborative editing
+            saveData(true, 'update', `lists/${editingListId}`, list);
+
+            showUpdateNotification(`List renamed from "${oldName}" to "${listName}"`, 'success');
+        }
     } else {
         // Create new
-        data.lists.push({ id: 'list-' + Date.now(), name: listName, items: [] });
+        const newList = {
+            id: 'list-' + Date.now(),
+            name: listName,
+            items: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        data.lists.push(newList);
+
+        // Track the operation for collaborative editing
+        saveData(true, 'create', 'lists', newList);
+
+        showUpdateNotification(`List "${listName}" created`, 'success');
     }
-    saveData();
+
     renderLists();
     closeListModal();
     renderSummary();
@@ -856,6 +904,9 @@ function closeListDetails() {
     const overlay = document.getElementById('list-details-overlay');
     overlay.classList.add('hidden');
 
+    // Clear search field
+    clearSearchField();
+
     // Clear editing presence
     if (currentEditingContext) {
         window.DataService.updatePresence('editEnd', currentEditingContext.listId);
@@ -889,25 +940,31 @@ function openItemModal(listId, itemId = null) {
     const overlay = document.getElementById('item-modal-overlay');
     const t = translations[currentLanguage];
     const title = document.getElementById('item-modal-title');
+
     if (itemId) {
         title.textContent = t.item_modal_edit;
         const list = (editingArchive ? data.archivedLists : data.lists).find(l => l.id === listId);
         const item = list.items.find(i => i.id === itemId);
-        // Derive global item
+
+        // Get global item to prefill name properly
         const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
         const nameInput = document.getElementById('item-name-input');
+
+        // Properly prefill the item name
         nameInput.value = globalItem ? globalItem.name : '';
         if (globalItem) {
             nameInput.dataset.selectedId = globalItem.id;
         } else {
             delete nameInput.dataset.selectedId;
         }
-        // Category comes from global item
+
+        // Update category dropdown with current categories
+        updateCategoryDropdowns();
+
+        // Set form values
         document.getElementById('item-category-select').value = globalItem ? globalItem.categoryId : data.categories[0].id;
-        // Quantity and unit
         document.getElementById('item-quantity-input').value = item.quantity;
         document.getElementById('item-unit-select').value = item.quantityUnit || (globalItem ? globalItem.priceUnit : 'piece');
-        // Price (actual price)
         document.getElementById('item-price-input').value = item.actualPrice != null ? item.actualPrice : '';
         document.getElementById('item-price-basis-input').value = item.priceBasisQuantity || 1;
         document.getElementById('item-notes-input').value = item.notes || '';
@@ -916,14 +973,19 @@ function openItemModal(listId, itemId = null) {
         const nameInput = document.getElementById('item-name-input');
         nameInput.value = '';
         delete nameInput.dataset.selectedId;
-        // Default values
-        document.getElementById('item-category-select').value = data.categories[0].id;
+
+        // Update category dropdown
+        updateCategoryDropdowns();
+
+        // Reset form to defaults
+        document.getElementById('item-category-select').value = data.categories[0]?.id || '';
         document.getElementById('item-quantity-input').value = 1;
         document.getElementById('item-unit-select').value = 'piece';
-        document.getElementById('item-price-input').value = 0;
+        document.getElementById('item-price-input').value = '';
         document.getElementById('item-price-basis-input').value = 1;
         document.getElementById('item-notes-input').value = '';
     }
+
     // Add data attributes for tracking
     const modal = document.getElementById('item-modal');
     modal.setAttribute('data-list-id', listId);
@@ -1181,82 +1243,60 @@ function importFromKeep() {
 
 // Export shopping data to CSV
 function exportToCSV() {
-    const rows = [];
-    // Header
-    rows.push(['List Name', 'Item Name', 'Quantity', 'Unit', 'Price', 'Basis Quantity', 'Category', 'Actual Price', 'Date Completed']);
-    const allLists = [...data.lists, ...data.archivedLists];
-    allLists.forEach(list => {
-        list.items.forEach(item => {
-            const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-            // Determine item name and category from global item if available
-            const itemName = globalItem ? globalItem.name : (item.name || '');
-            const categoryId = globalItem ? globalItem.categoryId : item.categoryId;
-            const category = data.categories.find(c => c.id === categoryId);
-            const categoryName = category ? (category.names.en || category.id) : '';
-            const priceVal = item.actualPrice != null ? item.actualPrice : (globalItem ? globalItem.estimatedPrice : 0);
-            const basis = item.priceBasisQuantity || 1;
-            const actualPrice = item.actualPrice != null ? priceVal : '';
-            const dateCompleted = list.completedAt || '';
-            rows.push([
-                list.name,
-                itemName,
-                item.quantity,
-                item.quantityUnit,
-                priceVal,
-                basis,
-                categoryName,
-                actualPrice,
-                dateCompleted
-            ]);
+    try {
+        const rows = [];
+        const t = translations[currentLanguage];
+
+        // Header
+        rows.push(['List Name', 'Item Name', 'Quantity', 'Unit', 'Price', 'Basis Quantity', 'Category', 'Actual Price', 'Date Completed']);
+
+        const allLists = [...data.lists, ...data.archivedLists];
+        allLists.forEach(list => {
+            list.items.forEach(item => {
+                const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+                const itemName = globalItem ? globalItem.name : (item.name || 'Unknown Item');
+                const categoryId = globalItem ? globalItem.categoryId : item.categoryId;
+                const category = data.categories.find(c => c.id === categoryId);
+                const categoryName = category ? (category.names[currentLanguage] || category.names.en || category.id) : '';
+                const priceVal = item.actualPrice != null ? item.actualPrice : (globalItem ? globalItem.estimatedPrice : 0);
+                const basis = item.priceBasisQuantity || 1;
+                const actualPrice = item.actualPrice != null ? priceVal : '';
+                const dateCompleted = list.completedAt || '';
+
+                rows.push([
+                    list.name,
+                    itemName,
+                    item.quantity,
+                    item.quantityUnit,
+                    priceVal,
+                    basis,
+                    categoryName,
+                    actualPrice,
+                    dateCompleted
+                ]);
+            });
         });
-    });
-    const csvContent = rows.map(r => r.map(field => {
-        const s = String(field == null ? '' : field);
-        // Escape double quotes by doubling
-        return '"' + s.replace(/"/g, '""') + '"';
-    }).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'shopping-data.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-}
 
-function refreshUI() {
-    renderLists();
-    renderSummary();
-    renderGlobalItems();
-    renderArchive();
-    renderCategories();
-    updateGlobalItemSuggestions();
-    const overlay = document.getElementById('list-details-overlay');
-    if (overlay && !overlay.classList.contains('hidden')) {
-        const listArr = editingArchive ? data.archivedLists : data.lists;
-        const current = listArr.find(l => l.id === editingItemListId);
-        if (current) renderItems(current);
+        const csvContent = rows.map(r => r.map(field => {
+            const s = String(field == null ? '' : field);
+            return '"' + s.replace(/"/g, '""') + '"';
+        }).join(',')).join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `shopping-data-${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        showUpdateNotification('CSV file downloaded successfully', 'success');
+    } catch (error) {
+        console.error('Export failed:', error);
+        showUpdateNotification('Failed to export CSV file', 'error');
     }
-}
-
-function undo() {
-    if (undoStack.length === 0) return;
-    redoStack.push(clone(data));
-    data = undoStack.pop();
-    lastSavedData = clone(data);
-    refreshUI();
-    saveData(false);
-}
-
-function redo() {
-    if (redoStack.length === 0) return;
-    undoStack.push(clone(data));
-    data = redoStack.pop();
-    lastSavedData = clone(data);
-    refreshUI();
-    saveData(false);
 }
 
 // Clear all data from localStorage and reset app
@@ -1477,7 +1517,7 @@ function showConflictResolutionModal(conflicts, mergedData, originalData) {
     });
 }
 
-// Add real-time operation handlers
+// Enhanced real-time operation handlers with proper item name handling
 window.onPresenceUpdated = function(users, editors) {
     connectedUsers = users;
     activeEditors = editors;
@@ -1486,46 +1526,19 @@ window.onPresenceUpdated = function(users, editors) {
 
 window.onRemoteDataUpdated = function(remoteData) {
     data = remoteData;
-    renderLists();
-    renderSummary();
-    renderGlobalItems();
-    renderArchive();
-    renderCategories();
-    updateGlobalItemSuggestions();
+    refreshUI();
     showPresenceIndicators();
 };
 
 window.onRemoteOperationsApplied = function(operations) {
     // Handle batch operations from other clients
     console.log('Remote operations applied:', operations);
-
-    // Show subtle notification
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: #4caf50;
-        color: white;
-        padding: 8px 16px;
-        border-radius: 4px;
-        z-index: 9999;
-        font-size: 0.8rem;
-        opacity: 0.9;
-    `;
-    notification.textContent = `${operations.length} updates from other users`;
-    document.body.appendChild(notification);
-
-    setTimeout(() => notification.remove(), 3000);
+    showUpdateNotification(`${operations.length} updates from other users`);
 };
 
 window.onRemoteOperationReceived = function(operation) {
     // Handle single real-time operation
     console.log('Real-time operation received:', operation);
-
-    // Apply operation locally for instant feedback
-    // This would require implementing operation transforms on the client side
-    // For now, we'll just refresh the affected UI components
 
     if (operation.path.startsWith('lists/')) {
         renderLists();
@@ -1536,25 +1549,200 @@ window.onRemoteOperationReceived = function(operation) {
     }
 };
 
-// Enhanced beforeunload handler for presence cleanup
-window.addEventListener('beforeunload', () => {
-    if (currentEditingContext) {
-        window.DataService.updatePresence('editEnd', currentEditingContext.listId);
-    }
-    window.DataService.updatePresence('disconnect');
-});
+// Enhanced socket event handlers for specific operations
+function setupSocketEventHandlers() {
+    if (!window.DataService?.socket) return;
 
-// Enhanced visibility change handler for better presence tracking
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        window.DataService.updatePresence('active');
-        showPresenceIndicators();
-    } else {
-        window.DataService.updatePresence('idle');
-    }
-});
+    const socket = window.DataService.socket;
 
-// Enhanced setupEvents function with collaboration features
+    // Item events with proper name handling
+    socket.on('itemAdded', (payload) => {
+        if (payload.clientId === window.DataService.clientId) return;
+
+        const list = data.lists.find(l => l.id === payload.listId);
+        if (list) {
+            // Add item with name already included from server
+            const newItem = {
+                ...payload.item,
+                name: payload.item.name // Use server-provided name
+            };
+            list.items.push(newItem);
+
+            // Update UI if this list is currently being viewed
+            if (editingItemListId === payload.listId) {
+                renderItems(list);
+            }
+            renderLists();
+            renderSummary();
+
+            showUpdateNotification(`New item "${payload.item.name}" added to ${list.name}`, 'info');
+        }
+    });
+
+    socket.on('itemUpdated', (payload) => {
+        if (payload.clientId === window.DataService.clientId) return;
+
+        const list = data.lists.find(l => l.id === payload.listId);
+        if (list) {
+            const itemIndex = list.items.findIndex(i => i.id === payload.itemId);
+            if (itemIndex >= 0) {
+                // Update item while preserving the name from server
+                list.items[itemIndex] = {
+                    ...payload.item,
+                    name: payload.item.name // Use server-provided name
+                };
+
+                // Update UI if this list is currently being viewed
+                if (editingItemListId === payload.listId) {
+                    renderItems(list);
+                }
+                renderLists();
+                renderSummary();
+
+                showUpdateNotification(`Item "${payload.item.name}" updated in ${list.name}`, 'info');
+            }
+        }
+    });
+
+    socket.on('itemDeleted', (payload) => {
+        if (payload.clientId === window.DataService.clientId) return;
+
+        const list = data.lists.find(l => l.id === payload.listId);
+        if (list) {
+            const itemName = payload.itemName || 'Item';
+
+            // Remove item from list
+            list.items = list.items.filter(i => i.id !== payload.itemId);
+
+            // Update UI if this list is currently being viewed
+            if (editingItemListId === payload.listId) {
+                renderItems(list);
+            }
+            renderLists();
+            renderSummary();
+
+            showUpdateNotification(`Item "${itemName}" deleted from ${list.name}`, 'info');
+        }
+    });
+
+    // List events
+    socket.on('listAdded', (payload) => {
+        if (payload.clientId === window.DataService.clientId) return;
+
+        data.lists.push(payload.list);
+        renderLists();
+        renderSummary();
+        showUpdateNotification(`New list "${payload.list.name}" created`, 'info');
+    });
+
+    socket.on('listUpdated', (payload) => {
+        if (payload.clientId === window.DataService.clientId) return;
+
+        const listIndex = data.lists.findIndex(l => l.id === payload.list.id);
+        if (listIndex >= 0) {
+            const oldName = data.lists[listIndex].name;
+            data.lists[listIndex] = payload.list;
+
+            // Update UI if this list is currently being viewed
+            if (editingItemListId === payload.list.id) {
+                const title = document.getElementById('list-details-title');
+                if (title) title.textContent = payload.list.name;
+            }
+
+            renderLists();
+            renderSummary();
+
+            if (oldName !== payload.list.name) {
+                showUpdateNotification(`List renamed from "${oldName}" to "${payload.list.name}"`, 'info');
+            }
+        }
+    });
+
+    socket.on('listDeleted', (payload) => {
+        if (payload.clientId === window.DataService.clientId) return;
+
+        const list = data.lists.find(l => l.id === payload.listId);
+        const listName = list ? list.name : 'List';
+
+        data.lists = data.lists.filter(l => l.id !== payload.listId);
+
+        // Close list details if this list is being viewed
+        if (editingItemListId === payload.listId) {
+            closeListDetails();
+        }
+
+        renderLists();
+        renderSummary();
+        showUpdateNotification(`List "${listName}" deleted`, 'info');
+    });
+
+    // Category events
+    socket.on('categoryAdded', (payload) => {
+        if (payload.clientId === window.DataService.clientId) return;
+
+        data.categories.push(payload.category);
+        renderCategories();
+        updateCategoryDropdowns();
+
+        const categoryName = payload.category.names?.[currentLanguage] || payload.category.id;
+        showUpdateNotification(`New category "${categoryName}" added`, 'info');
+    });
+}
+
+// Helper function to get item name with fallback
+function getItemName(item) {
+    if (item.name) return item.name;
+
+    const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+    return globalItem ? globalItem.name : 'Unknown Item';
+}
+
+// Enhanced notification system
+function showUpdateNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: ${type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#2196f3'};
+        color: white;
+        padding: 12px 20px;
+        border-radius: 6px;
+        z-index: 9999;
+        font-size: 0.9rem;
+        max-width: 300px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        animation: slideIn 0.3s ease-out;
+    `;
+
+    // Add slide-in animation
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    `;
+    document.head.appendChild(style);
+
+    notification.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <i class="bi bi-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-triangle' : 'info-circle'}"></i>
+            <span>${message}</span>
+        </div>
+    `;
+
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.style.animation = 'slideIn 0.3s ease-out reverse';
+            setTimeout(() => notification.remove(), 300);
+        }
+    }, 4000);
+}
+
+// Enhanced socket connection and event handling
 function setupEvents() {
     // Language selection
     document.getElementById('language-select').addEventListener('change', (e) => {
@@ -2020,26 +2208,53 @@ function createItemElement(item, list, isChecked = false) {
     const content = document.createElement('div');
     content.className = 'flex-grow-1';
 
-    // Checkbox and name
+    // Checkbox and name - Enhanced clickable area
     const checkboxContainer = document.createElement('div');
     checkboxContainer.style.display = 'flex';
     checkboxContainer.style.alignItems = 'center';
     checkboxContainer.style.gap = '0.5rem';
+    checkboxContainer.style.cursor = 'pointer';
+    checkboxContainer.style.padding = '0.25rem 0';
+    checkboxContainer.style.minHeight = '44px'; // Increase touch target
+    checkboxContainer.style.width = '100%';
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = item.isChecked;
-    checkbox.addEventListener('change', () => {
-        item.isChecked = checkbox.checked;
+    checkbox.style.width = '18px';
+    checkbox.style.height = '18px';
+    checkbox.style.cursor = 'pointer';
+
+    const toggleCheck = () => {
+        // Preserve item name and other properties when toggling check state
+        const previousState = item.isChecked;
+        item.isChecked = !previousState;
+
+        // Ensure the globalItemId is preserved
+        if (!item.globalItemId && globalItem) {
+            item.globalItemId = globalItem.id;
+        }
+
+        checkbox.checked = item.isChecked;
         saveData(true, 'update', `lists/${list.id}/items/${item.id}`, item);
         renderItems(list);
         renderLists();
         renderSummary();
+    };
+
+    checkbox.addEventListener('change', toggleCheck);
+    checkboxContainer.addEventListener('click', (e) => {
+        if (e.target !== checkbox) {
+            toggleCheck();
+        }
     });
 
     const nameSpan = document.createElement('span');
     nameSpan.textContent = itemName;
     nameSpan.className = 'item-text';
+    nameSpan.style.cursor = 'pointer';
+    nameSpan.style.userSelect = 'none';
+    nameSpan.style.flex = '1';
     if (isChecked) {
         nameSpan.style.textDecoration = 'line-through';
         nameSpan.style.opacity = '0.6';
@@ -2054,6 +2269,7 @@ function createItemElement(item, list, isChecked = false) {
     details.style.fontSize = '0.85rem';
     details.style.color = '#666';
     details.style.marginTop = '0.25rem';
+    details.style.marginLeft = '1.5rem'; // Align with text
 
     let detailsText = `${item.quantity} ${item.quantityUnit || 'piece'}`;
     if (item.actualPrice != null) {
@@ -2068,33 +2284,45 @@ function createItemElement(item, list, isChecked = false) {
     content.appendChild(details);
     li.appendChild(content);
 
-    // Action buttons
-    const btnGroup = document.createElement('div');
-    btnGroup.className = 'btn-group btn-group-sm';
+    // Action buttons - only show if not archived
+    if (!editingArchive) {
+        const btnGroup = document.createElement('div');
+        btnGroup.className = 'btn-group btn-group-sm';
 
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn btn-outline-secondary';
-    editBtn.innerHTML = '<i class="bi bi-pencil"></i>';
-    editBtn.title = t.edit_global_item;
-    editBtn.addEventListener('click', () => openItemModal(list.id, item.id));
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn btn-outline-secondary';
+        editBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+        editBtn.title = t.edit_global_item;
+        editBtn.style.minWidth = '44px'; // Larger touch target
+        editBtn.style.minHeight = '44px';
+        editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openItemModal(list.id, item.id);
+        });
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'btn btn-outline-danger';
-    deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
-    deleteBtn.title = t.delete_list;
-    deleteBtn.addEventListener('click', () => {
-        if (confirm('Delete item?')) {
-            list.items = list.items.filter(i => i.id !== item.id);
-            saveData(true, 'delete', `lists/${list.id}/items/${item.id}`, null);
-            renderItems(list);
-            renderLists();
-            renderSummary();
-        }
-    });
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-outline-danger';
+        deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+        deleteBtn.title = t.delete_list;
+        deleteBtn.style.minWidth = '44px'; // Larger touch target
+        deleteBtn.style.minHeight = '44px';
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm('Delete item?')) {
+                const itemName = globalItem ? globalItem.name : 'Item';
+                list.items = list.items.filter(i => i.id !== item.id);
+                saveData(true, 'delete', `lists/${list.id}/items/${item.id}`, null);
+                renderItems(list);
+                renderLists();
+                renderSummary();
+                showUpdateNotification(`Item "${itemName}" deleted`, 'success');
+            }
+        });
 
-    btnGroup.appendChild(editBtn);
-    btnGroup.appendChild(deleteBtn);
-    li.appendChild(btnGroup);
+        btnGroup.appendChild(editBtn);
+        btnGroup.appendChild(deleteBtn);
+        li.appendChild(btnGroup);
+    }
 
     return li;
 }
@@ -2256,19 +2484,22 @@ function addCategory() {
     const input = document.getElementById('new-category-input');
     const categoryName = input.value.trim();
 
-    if (!categoryName) return;
+    if (!categoryName) {
+        showUpdateNotification('Category name is required', 'error');
+        return;
+    }
 
-    // Check if category already exists
+    // Check if category already exists (case-insensitive)
     const exists = data.categories.some(cat =>
         cat.names && (
-            cat.names.en === categoryName ||
-            cat.names.he === categoryName ||
-            cat.id === categoryName.toLowerCase()
+            cat.names.en?.toLowerCase() === categoryName.toLowerCase() ||
+            cat.names.he?.toLowerCase() === categoryName.toLowerCase() ||
+            cat.id.toLowerCase() === categoryName.toLowerCase()
         )
     );
 
     if (exists) {
-        alert('Category already exists');
+        showUpdateNotification('Category already exists', 'error');
         return;
     }
 
@@ -2281,12 +2512,12 @@ function addCategory() {
     };
 
     data.categories.push(newCategory);
-    saveData();
+    saveData(true, 'create', 'categories', newCategory);
     renderCategories();
+    updateCategoryDropdowns();
     input.value = '';
 
-    // Update category selects in modals
-    applyLanguage();
+    showUpdateNotification(`Category "${categoryName}" created`, 'success');
 }
 
 // Display receipts
@@ -2382,9 +2613,215 @@ async function initApp() {
     }
 }
 
+// Update category dropdowns dynamically when categories change
+function updateCategoryDropdowns() {
+    const selects = [
+        document.getElementById('item-category-select'),
+        document.getElementById('global-category-select')
+    ];
+
+    selects.forEach(select => {
+        if (select) {
+            const currentValue = select.value;
+            select.innerHTML = '';
+
+            data.categories.forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat.id;
+                option.textContent = cat.names[currentLanguage] || cat.names.en || cat.names.he || cat.id;
+                select.appendChild(option);
+            });
+
+            // Restore previous selection if still valid
+            if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
+                select.value = currentValue;
+            }
+        }
+    });
+}
+
+// Enhanced share functionality with proper clipboard support and feedback
+function shareList(listId) {
+    const t = translations[currentLanguage];
+    const url = new URL(window.location);
+    url.searchParams.set('list', listId);
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url.toString()).then(() => {
+            showUpdateNotification(`${t.share_link} - Link copied to clipboard!`, 'success');
+        }).catch(() => {
+            // Fallback for clipboard API failure
+            showShareFallback(url.toString(), t);
+        });
+    } else {
+        // Fallback for older browsers or insecure contexts
+        showShareFallback(url.toString(), t);
+    }
+}
+
+function showShareFallback(url, t) {
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10001;
+    `;
+
+    const content = document.createElement('div');
+    content.style.cssText = `
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    `;
+
+    content.innerHTML = `
+        <h3>Share List</h3>
+        <p>Copy this link to share the list:</p>
+        <div style="display: flex; gap: 0.5rem; margin: 1rem 0;">
+            <input type="text" value="${url}" readonly style="flex: 1; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;">
+            <button id="copy-url-btn" class="btn btn-primary">Copy</button>
+        </div>
+        <div style="text-align: right;">
+            <button id="close-share-modal" class="btn btn-secondary">Close</button>
+        </div>
+    `;
+
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+
+    // Copy button functionality
+    content.querySelector('#copy-url-btn').addEventListener('click', () => {
+        const input = content.querySelector('input');
+        input.select();
+        try {
+            document.execCommand('copy');
+            showUpdateNotification('Link copied to clipboard!', 'success');
+            modal.remove();
+        } catch (err) {
+            showUpdateNotification('Failed to copy link', 'error');
+        }
+    });
+
+    // Close button
+    content.querySelector('#close-share-modal').addEventListener('click', () => {
+        modal.remove();
+    });
+
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+// Clear search field when closing modals or switching contexts
+function clearSearchField() {
+    const searchInput = document.getElementById('item-search');
+    if (searchInput) {
+        searchInput.value = '';
+        itemSearchTerm = '';
+
+        // Show clear indicator if search was active
+        if (itemSearchTerm) {
+            showUpdateNotification('Search cleared', 'info');
+        }
+    }
+}
+
+// Enhanced currency symbol handling
+function applyCurrencyChanges() {
+    const currencyInput = document.getElementById('default-currency');
+    if (currencyInput) {
+        currencyInput.addEventListener('input', () => {
+            // Save currency preference
+            localStorage.setItem('shopping-list-currency', currencyInput.value);
+
+            // Refresh displays that show currency
+            renderSummary();
+            renderGlobalItems();
+
+            // Update any open item details
+            if (editingItemListId) {
+                const list = (editingArchive ? data.archivedLists : data.lists).find(l => l.id === editingItemListId);
+                if (list) renderItems(list);
+            }
+
+            showUpdateNotification('Currency symbol updated', 'success');
+        });
+
+        // Load saved currency preference
+        const savedCurrency = localStorage.getItem('shopping-list-currency');
+        if (savedCurrency) {
+            currencyInput.value = savedCurrency;
+        }
+    }
+}
+
+// Refresh all UI components
+function refreshUI() {
+    renderLists();
+    renderSummary();
+    renderGlobalItems();
+    renderArchive();
+    renderCategories();
+    updateGlobalItemSuggestions();
+    const overlay = document.getElementById('list-details-overlay');
+    if (overlay && !overlay.classList.contains('hidden')) {
+        const listArr = editingArchive ? data.archivedLists : data.lists;
+        const current = listArr.find(l => l.id === editingItemListId);
+        if (current) renderItems(current);
+    }
+}
+
+// Enhanced undo/redo functionality
+function undo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(clone(data));
+    data = undoStack.pop();
+    lastSavedData = clone(data);
+    refreshUI();
+    saveData(false);
+    showUpdateNotification('Action undone', 'info');
+}
+
+function redo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(clone(data));
+    data = redoStack.pop();
+    lastSavedData = clone(data);
+    refreshUI();
+    saveData(false);
+    showUpdateNotification('Action redone', 'info');
+}
+
 // Initialize when DOM is loaded
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initApp);
+    document.addEventListener('DOMContentLoaded', () => {
+        initApp();
+
+        // Setup additional enhancements after init
+        setTimeout(() => {
+            applyCurrencyChanges();
+            setupSocketEventHandlers();
+        }, 100);
+    });
 } else {
     initApp();
+
+    // Setup additional enhancements after init
+    setTimeout(() => {
+        applyCurrencyChanges();
+        setupSocketEventHandlers();
+    }, 100);
 }

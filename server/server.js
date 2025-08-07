@@ -398,13 +398,8 @@ app.put('/data', async (req, res) => {
 
     await saveData(appData);
 
-    // Broadcast to all clients except sender
-    io.emit('dataUpdated', {
-      data: appData,
-      clientId,
-      changeId,
-      operations: clientOps
-    });
+    // Enhanced broadcasting with specific event types
+    broadcastDataUpdate(clientId, changeId, clientOps, mergedData);
 
     res.json({
       message: 'Data updated successfully',
@@ -418,46 +413,155 @@ app.put('/data', async (req, res) => {
   }
 });
 
-// New endpoint for granular operations
-app.post('/operations', async (req, res) => {
-  const { operations, clientId } = req.body || {};
+// Enhanced broadcasting function for specific operations
+function broadcastDataUpdate(clientId, changeId, operations, data) {
+  // General data update
+  io.emit('dataUpdated', {
+    data: appData,
+    clientId,
+    changeId,
+    operations
+  });
 
-  if (!Array.isArray(operations) || !clientId) {
-    return res.status(400).json({ message: 'Invalid operations data' });
+  // Specific operation broadcasts
+  if (operations && operations.length > 0) {
+    operations.forEach(op => {
+      switch (op.type) {
+        case 'create':
+          if (op.path.includes('items')) {
+            broadcastItemAdded(op, clientId);
+          } else if (op.path === 'lists') {
+            broadcastListAdded(op, clientId);
+          } else if (op.path === 'categories') {
+            broadcastCategoryAdded(op, clientId);
+          }
+          break;
+        case 'update':
+          if (op.path.includes('items')) {
+            broadcastItemUpdated(op, clientId);
+          } else if (op.path.startsWith('lists/') && !op.path.includes('items')) {
+            broadcastListUpdated(op, clientId);
+          }
+          break;
+        case 'delete':
+          if (op.path.includes('items')) {
+            broadcastItemDeleted(op, clientId);
+          } else if (op.path.startsWith('lists/')) {
+            broadcastListDeleted(op, clientId);
+          }
+          break;
+      }
+    });
   }
+}
 
-  try {
-    // Apply operations one by one
-    for (const op of operations) {
-      applyOperation(op);
-      appData.operations.push(op);
+function broadcastItemAdded(operation, excludeClientId) {
+  const { path, data: itemData } = operation;
+  const listId = path.split('/')[1];
+
+  // Get the global item to include name
+  const globalItem = appData.globalItems.find(g => g.id === itemData.globalItemId);
+  const itemWithName = {
+    ...itemData,
+    name: globalItem ? globalItem.name : 'Unknown Item',
+    categoryName: getCategoryName(globalItem?.categoryId)
+  };
+
+  io.emit('itemAdded', {
+    listId,
+    item: itemWithName,
+    clientId: excludeClientId
+  });
+}
+
+function broadcastItemUpdated(operation, excludeClientId) {
+  const { path, data: itemData } = operation;
+  const pathParts = path.split('/');
+  const listId = pathParts[1];
+  const itemId = pathParts[3];
+
+  // Get the global item to include name
+  const globalItem = appData.globalItems.find(g => g.id === itemData.globalItemId);
+  const itemWithName = {
+    ...itemData,
+    name: globalItem ? globalItem.name : 'Unknown Item',
+    categoryName: getCategoryName(globalItem?.categoryId)
+  };
+
+  io.emit('itemUpdated', {
+    listId,
+    itemId,
+    item: itemWithName,
+    clientId: excludeClientId
+  });
+}
+
+function broadcastItemDeleted(operation, excludeClientId) {
+  const { path } = operation;
+  const pathParts = path.split('/');
+  const listId = pathParts[1];
+  const itemId = pathParts[3];
+
+  // Find the item being deleted to include its name in the broadcast
+  const list = appData.lists.find(l => l.id === listId);
+  let itemName = 'Unknown Item';
+  if (list) {
+    const item = list.items.find(i => i.id === itemId);
+    if (item) {
+      const globalItem = appData.globalItems.find(g => g.id === item.globalItemId);
+      itemName = globalItem ? globalItem.name : 'Unknown Item';
     }
-
-    appData.revision += operations.length;
-    appData.lastModified = new Date().toISOString();
-
-    // Keep only recent operations
-    appData.operations = appData.operations.slice(-100);
-
-    await saveData(appData);
-
-    // Broadcast operations to other clients
-    io.emit('operationsApplied', {
-      operations,
-      clientId,
-      revision: appData.revision
-    });
-
-    res.json({
-      message: 'Operations applied successfully',
-      revision: appData.revision
-    });
-
-  } catch (error) {
-    console.error('Error applying operations:', error);
-    res.status(500).json({ message: 'Failed to apply operations' });
   }
-});
+
+  io.emit('itemDeleted', {
+    listId,
+    itemId,
+    itemName,
+    clientId: excludeClientId
+  });
+}
+
+function broadcastListAdded(operation, excludeClientId) {
+  const { data: listData } = operation;
+
+  io.emit('listAdded', {
+    list: listData,
+    clientId: excludeClientId
+  });
+}
+
+function broadcastListUpdated(operation, excludeClientId) {
+  const { data: listData } = operation;
+
+  io.emit('listUpdated', {
+    list: listData,
+    clientId: excludeClientId
+  });
+}
+
+function broadcastListDeleted(operation, excludeClientId) {
+  const { path } = operation;
+  const listId = path.split('/')[1];
+
+  io.emit('listDeleted', {
+    listId,
+    clientId: excludeClientId
+  });
+}
+
+function broadcastCategoryAdded(operation, excludeClientId) {
+  const { data: categoryData } = operation;
+
+  io.emit('categoryAdded', {
+    category: categoryData,
+    clientId: excludeClientId
+  });
+}
+
+function getCategoryName(categoryId) {
+  const category = appData.categories.find(c => c.id === categoryId);
+  return category ? (category.names?.en || category.names?.he || category.id) : 'Other';
+}
 
 // Enhanced user presence tracking
 app.post('/presence', (req, res) => {
@@ -611,7 +715,6 @@ loadData()
     });
   });
 
-// ...existing code...
 function mergeOperations(baseRevision, operations, newData, clientId) {
   // Create a working copy of current server data
   const conflictingOps = appData.operations.filter(op =>

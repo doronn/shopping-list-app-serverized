@@ -105,6 +105,43 @@ nav button.active {
     }
 }
 
+/* Enhanced mobile and touch improvements */
+@media (max-width: 768px) {
+    /* Larger touch targets for mobile */
+    .btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0.5rem 0.75rem;
+    }
+
+    /* Improve checkbox visibility and touch area */
+    input[type="checkbox"] {
+        width: 20px !important;
+        height: 20px !important;
+        margin-right: 0.75rem;
+    }
+
+    /* Better spacing for list items */
+    .list-group-item {
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+    }
+
+    /* Larger category headings */
+    .category-heading {
+        padding: 0.75rem 0;
+        font-size: 1.1rem;
+    }
+
+    /* Improved modal close buttons */
+    .modal button[onclick*="remove"] {
+        font-size: 1.5rem;
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0.5rem;
+    }
+}
+
 .page {
     display: none;
 }
@@ -367,4 +404,141 @@ nav button.active {
 
 .suggestions div:hover {
     background: #eee;
+}
+
+/* Enhanced fullscreen mode */
+#list-details-overlay.fullscreen {
+    padding: 0;
+}
+
+#list-details.fullscreen {
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    margin: 0;
+}
+
+/* Better confirmation dialog positioning */
+.confirmation-dialog {
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    z-index: 10001;
+    max-width: 400px;
+    width: 90%;
+}
+
+.confirmation-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 10000;
+}
+
+/* Search filter indicator */
+.search-active-indicator {
+    position: absolute;
+    top: 0.5rem;
+    right: 3rem;
+    background: #ffc107;
+    color: #000;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    z-index: 100;
+    pointer-events: none;
+}
+
+/* Enhanced notification positioning for mobile */
+@media (max-width: 768px) {
+    .notification {
+        bottom: 20px !important;
+        left: 20px !important;
+        right: 20px !important;
+        max-width: none !important;
+    }
+}
+
+/* Better focus indicators for accessibility */
+button:focus,
+input:focus,
+select:focus,
+textarea:focus {
+    outline: 2px solid #4a90e2;
+    outline-offset: 2px;
+}
+
+/* Loading states */
+.btn.loading {
+    position: relative;
+    color: transparent;
+}
+
+.btn.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: translate(-50%, -50%) rotate(360deg);
+    }
+}
+
+/* Enhanced item display */
+.item-text {
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+/* Better category organization */
+.category-heading button {
+    white-space: nowrap;
+    font-size: 0.8rem;
+}
+
+/* Archive-specific styling */
+.archive-list {
+    opacity: 0.9;
+    border-left: 4px solid #6c757d;
+}
+
+.archive-list .btn {
+    opacity: 0.8;
+}
+
+/* Connection status improvements */
+.connection-status {
+    animation: slideInFromLeft 0.3s ease-out;
+}
+
+@keyframes slideInFromLeft {
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
