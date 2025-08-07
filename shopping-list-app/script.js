@@ -1478,6 +1478,23 @@ function showConflictResolutionModal(conflicts, mergedData, originalData) {
 }
 
 // Add real-time operation handlers
+window.onPresenceUpdated = function(users, editors) {
+    connectedUsers = users;
+    activeEditors = editors;
+    showPresenceIndicators();
+};
+
+window.onRemoteDataUpdated = function(remoteData) {
+    data = remoteData;
+    renderLists();
+    renderSummary();
+    renderGlobalItems();
+    renderArchive();
+    renderCategories();
+    updateGlobalItemSuggestions();
+    showPresenceIndicators();
+};
+
 window.onRemoteOperationsApplied = function(operations) {
     // Handle batch operations from other clients
     console.log('Remote operations applied:', operations);
@@ -2354,6 +2371,7 @@ async function initApp() {
             showPresenceIndicators();
 
             // Connect to collaboration server
+            window.DataService.initSocket();
             window.DataService.updatePresence('connect');
         }
 
