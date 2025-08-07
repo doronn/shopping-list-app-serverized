@@ -448,23 +448,12 @@ const DataService = {
     async sendOperations(operations) {
         if (!this.useServer || !operations.length) return;
 
-        try {
-            const resp = await fetch(`${this.serverBaseUrl}/operations`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    operations,
-                    clientId: this.clientId
-                })
-            });
-
-            if (resp.ok) {
-                const result = await resp.json();
-                this.lastRevision = result.revision;
-            }
-        } catch (err) {
-            console.error('Failed to send operations:', err);
+        // Use Socket.IO for real-time operations if available
+        if (this.socket && this.socket.connected) {
+            this.socket.emit('operation', operations[0]); // Send one operation at a time
+            return;
         }
+        // If no socket, do nothing (server does not support /operations REST endpoint)
     },
 
     /**
