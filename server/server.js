@@ -23,6 +23,42 @@ const connectedUsers = new Map();
 const activeEditors = new Map(); // Track who's editing what
 const pendingOperations = new Map(); // Track operations awaiting confirmation
 
+// Aggregate Firebase writes to reduce churn
+let pendingChangeCount = 0;
+let saveTimer = null;
+const SAVE_INTERVAL_MS = 10000; // commit every 10s
+const SAVE_OPERATION_THRESHOLD = 20; // or after 20 ops
+
+async function flushPendingSaves() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (!pendingChangeCount) return;
+  pendingChangeCount = 0;
+  try {
+    await saveData(appData);
+  } catch (err) {
+    console.error('Failed to persist data:', err);
+  }
+}
+
+function scheduleSave() {
+  pendingChangeCount++;
+  if (pendingChangeCount >= SAVE_OPERATION_THRESHOLD) {
+    flushPendingSaves();
+    return;
+  }
+  if (!saveTimer) {
+    saveTimer = setTimeout(flushPendingSaves, SAVE_INTERVAL_MS);
+  }
+}
+
+process.on('SIGINT', async () => {
+  await flushPendingSaves();
+  process.exit();
+});
+
 const app = express();
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
@@ -396,7 +432,7 @@ app.put('/data', async (req, res) => {
       appData.operations = appData.operations.slice(-100);
     }
 
-    await saveData(appData);
+    scheduleSave();
 
     // Enhanced broadcasting with specific event types
     broadcastDataUpdate(clientId, changeId, clientOps, mergedData);
@@ -614,7 +650,7 @@ app.post('/data/clear', async (req, res) => {
     lastModified: new Date().toISOString(),
     operations: []
   };
-  await saveData(appData);
+  scheduleSave();
   io.emit('dataUpdated', { data: appData });
   res.json({ message: 'Data cleared' });
 });
@@ -639,8 +675,10 @@ io.on('connection', socket => {
       applyOperation(op);
       appData.operations.push(op);
       appData.revision++;
+      scheduleSave();
 
-      // Broadcast to other clients
+      // Acknowledge sender and broadcast to others
+      socket.emit('operationAck', { id: op.id, revision: appData.revision });
       socket.broadcast.emit('operationReceived', op);
     } catch (error) {
       console.error('Error handling operation:', error);
@@ -775,7 +813,7 @@ app.post('/data/merge', async (req, res) => {
       checksum: generateChecksum(mergedData)
     };
 
-    await saveData(appData);
+    scheduleSave();
 
     // Broadcast merged result
     io.emit('dataUpdated', {
@@ -918,7 +956,7 @@ app.post('/data/rollback', async (req, res) => {
     const success = rollbackToSnapshot(snapshotIndex);
 
     if (success) {
-      await saveData(appData);
+      scheduleSave();
 
       io.emit('dataUpdated', {
         data: appData,
