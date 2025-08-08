@@ -16,6 +16,7 @@ const DataService = {
     clientId: Math.random().toString(36).slice(2),
     pendingOperations: [],
     operationQueue: [],
+    inFlightOperation: null,
     saveTimer: null,
     lastRevision: 0,
     baseRevision: 0,
@@ -448,12 +449,17 @@ const DataService = {
     async sendOperations(operations) {
         if (!this.useServer || !operations.length) return;
 
-        // Use Socket.IO for real-time operations if available
-        if (this.socket && this.socket.connected) {
-            this.socket.emit('operation', operations[0]); // Send one operation at a time
-            return;
-        }
-        // If no socket, do nothing (server does not support /operations REST endpoint)
+        this.pendingOperations.push(...operations);
+        this.flushSocketQueue();
+    },
+
+    flushSocketQueue() {
+        if (!this.socket || !this.socket.connected) return;
+        if (this.inFlightOperation || this.pendingOperations.length === 0) return;
+
+        const op = this.pendingOperations[0];
+        this.inFlightOperation = op;
+        this.socket.emit('operation', op);
     },
 
     /**
@@ -512,6 +518,8 @@ const DataService = {
             console.log('Connected to shopping list server');
             this.isConnected = true;
 
+            this.flushSocketQueue();
+
             // Send initial presence
             this.updatePresence('connected');
         });
@@ -531,6 +539,16 @@ const DataService = {
 
         this.socket.on('operationReceived', (operation) => {
             this.handleRemoteOperation(operation);
+        });
+
+        this.socket.on('operationAck', (ack) => {
+            if (this.inFlightOperation && ack.id === this.inFlightOperation.id) {
+                this.lastRevision = ack.revision || this.lastRevision;
+                this.baseRevision = this.lastRevision;
+                this.pendingOperations.shift();
+                this.inFlightOperation = null;
+                this.flushSocketQueue();
+            }
         });
 
         this.socket.on('presenceUpdate', (payload) => {
