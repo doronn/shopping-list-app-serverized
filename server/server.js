@@ -1,6 +1,7 @@
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const http = require('http');
 const { Server } = require('socket.io');
 const { init, loadData, saveData, watchData } = require('./db');
@@ -69,7 +70,9 @@ const io = new Server(httpServer, {
 
 init();
 
-app.use(cors());
+const corsOrigin = process.env.CORS_ORIGIN || '*';
+app.use(cors({ origin: corsOrigin }));
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '5mb' }));
 
 // Serve the static front‑end files
@@ -458,6 +461,15 @@ function broadcastDataUpdate(clientId, changeId, operations, data) {
     changeId,
     operations
   });
+
+  // Notify clients that a batch of operations has been applied (aligns with DataService expectations)
+  if (operations && operations.length > 0) {
+    io.emit('operationsApplied', {
+      operations,
+      revision: appData.revision,
+      clientId
+    });
+  }
 
   // Specific operation broadcasts
   if (operations && operations.length > 0) {

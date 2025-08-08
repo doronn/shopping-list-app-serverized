@@ -55,3 +55,14 @@ Send a POST request to `/data/clear` or use the "Clear All Data" button in the S
 ## License
 
 This project is provided as-is without any specific license.
+
+
+## Configuration
+
+- FIREBASE_SERVICE_ACCOUNT_JSON (required in production): base64-encoded Firebase service account JSON used by the backend to persist data to Firestore. If not set, the app runs without Firebase persistence (local-only mode on the server; the client still works using localStorage).
+- CORS_ORIGIN (optional): Allowed origin for CORS. Defaults to '*'. Set to your client origin (e.g., https://your-app.onrender.com) when serving the API to a separate frontend.
+- Security headers: The server uses Helmet with a relaxed configuration (CSP disabled) to allow CDN assets (Bootstrap and Socket.IO client). Adjust as needed if you self-host all assets.
+
+### Real-time Events
+- Server now emits 'operationsApplied' after PUT /data when applying batches of operations, in addition to 'dataUpdated'. This aligns with the client's DataService listeners and improves UI feedback for remote changes.
+- Other Socket.IO events: 'operationAck', 'operationReceived', 'itemAdded', 'itemUpdated', 'itemDeleted', 'listAdded', 'listUpdated', 'listDeleted', 'categoryAdded', 'presenceUpdate'.
