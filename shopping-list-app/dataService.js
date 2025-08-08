@@ -66,7 +66,12 @@ const DataService = {
      * @returns {Promise<void>}
      */
     async saveData(dataObj) {
-        // Try saving to the server when useServer is true.
+        // Prefer sending updates via WebSocket when connected to the server.
+        if (this.useServer && this.socket) {
+            this.socket.emit('updateData', dataObj);
+            return;
+        }
+        // Fallback to REST when WebSocket is unavailable.
         if (this.useServer && this.serverBaseUrl) {
             try {
                 const resp = await fetch(`${this.serverBaseUrl}/data`, {
@@ -77,13 +82,12 @@ const DataService = {
                 if (resp.ok) {
                     return;
                 }
-                // Non‑OK responses trigger fallback to localStorage.
                 console.warn('Remote save failed with status', resp.status, '- falling back to localStorage');
             } catch (err) {
                 console.error('Failed to save data to server:', err);
             }
         }
-        // Fallback: store data in localStorage.
+        // Final fallback: store data in localStorage.
         try {
             const json = JSON.stringify(dataObj);
             window.localStorage.setItem(STORAGE_KEY, json);
@@ -132,6 +136,10 @@ const DataService = {
      */
     async clearData() {
         // Attempt to clear data via the server when useServer is enabled.
+        if (this.useServer && this.socket) {
+            this.socket.emit('clearData');
+            return;
+        }
         if (this.useServer && this.serverBaseUrl) {
             try {
                 const resp = await fetch(`${this.serverBaseUrl}/data/clear`, { method: 'POST' });

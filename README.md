@@ -38,6 +38,13 @@ When the frontend loads it attempts to use the backend via `DataService`. If the
 - WebSocket updates are broadcast using Socket.IO on every data change.
 - The client code lives in `shopping-list-app/script.js` and uses `dataService.js` to abstract storage.
 
+## Firestore Writes
+
+To reduce Firestore write volume during rapid edits, the server batches
+changes in memory and flushes them to Firestore every few seconds.
+Clients send updates primarily over WebSockets which keeps the in‑memory
+state authoritative while avoiding excessive REST calls.
+
 ## Clearing Data
 
 Send a POST request to `/data/clear` or use the "Clear All Data" button in the Settings page to reset the stored data.

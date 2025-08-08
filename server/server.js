@@ -15,6 +15,22 @@ let appData = {
   receipts: []
 };
 
+// Debounce Firestore writes so rapid consecutive updates are batched
+// together. This greatly reduces write frequency when multiple clients
+// are editing simultaneously.
+let saveTimer = null;
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await saveData(appData);
+    } catch (err) {
+      console.error('Failed to persist data', err);
+    }
+    saveTimer = null;
+  }, 5000);
+}
+
 const app = express();
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
@@ -40,7 +56,7 @@ app.put('/data', async (req, res) => {
     return;
   }
   appData = newData;
-  await saveData(appData);
+  scheduleSave();
   // Broadcast to all connected clients that data has changed
   io.emit('dataUpdated', appData);
   res.json({ message: 'Data updated' });
@@ -55,7 +71,7 @@ app.post('/data/clear', async (req, res) => {
     archivedLists: [],
     receipts: []
   };
-  await saveData(appData);
+  scheduleSave();
   io.emit('dataUpdated', appData);
   res.json({ message: 'Data cleared' });
 });
@@ -63,6 +79,25 @@ app.post('/data/clear', async (req, res) => {
 // WebSocket connection: send current data on connection
 io.on('connection', socket => {
   socket.emit('dataUpdated', appData);
+
+  socket.on('updateData', newData => {
+    if (!newData || typeof newData !== 'object') return;
+    appData = newData;
+    scheduleSave();
+    io.emit('dataUpdated', appData);
+  });
+
+  socket.on('clearData', () => {
+    appData = {
+      lists: [],
+      globalItems: [],
+      categories: [],
+      archivedLists: [],
+      receipts: []
+    };
+    scheduleSave();
+    io.emit('dataUpdated', appData);
+  });
 });
 
 const PORT = process.env.PORT || 3000;

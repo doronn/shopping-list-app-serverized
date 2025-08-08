@@ -3,14 +3,22 @@ const admin = require('firebase-admin');
 let db;
 
 function init() {
-  const serviceAccount = JSON.parse(
-    Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_JSON, 'base64').toString('utf8')
-  );
-  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-  db = admin.firestore();
+  const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!encoded) {
+    console.warn('FIREBASE_SERVICE_ACCOUNT_JSON not provided; using in-memory storage only');
+    return;
+  }
+  try {
+    const serviceAccount = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    db = admin.firestore();
+  } catch (err) {
+    console.error('Failed to initialise Firestore', err);
+  }
 }
 
 async function loadCollection(name) {
+  if (!db) return [];
   const snapshot = await db.collection(name).get();
   return snapshot.docs.map(doc => doc.data());
 }
@@ -18,6 +26,7 @@ async function loadCollection(name) {
 // Replace the entire collection in a single batch so snapshot listeners
 // don't observe a momentary empty state during updates.
 async function saveCollection(name, items) {
+  if (!db) return;
   const coll = db.collection(name);
   const snapshot = await coll.get();
   const batch = db.batch();
@@ -37,6 +46,15 @@ async function saveCollection(name, items) {
 }
 
 async function loadData() {
+  if (!db) {
+    return {
+      lists: [],
+      globalItems: [],
+      categories: [],
+      archivedLists: [],
+      receipts: []
+    };
+  }
   return {
     lists: await loadCollection('lists'),
     globalItems: await loadCollection('items'),
@@ -47,6 +65,7 @@ async function loadData() {
 }
 
 async function saveData(data) {
+  if (!db) return;
   await Promise.all([
     saveCollection('lists', data.lists),
     saveCollection('items', data.globalItems),
@@ -57,6 +76,7 @@ async function saveData(data) {
 }
 
 function watchCollection(collection, key, onChange) {
+  if (!db) return () => {};
   return db.collection(collection).onSnapshot(snapshot => {
     const items = [];
     snapshot.forEach(doc => {
@@ -74,6 +94,7 @@ function watchCollection(collection, key, onChange) {
 }
 
 function watchData(onChange) {
+  if (!db) return () => {};
   const unsubscribers = [
     watchCollection('lists', 'lists', onChange),
     watchCollection('items', 'globalItems', onChange),
