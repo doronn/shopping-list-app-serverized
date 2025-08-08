@@ -739,4 +739,702 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-//# sourceMappingURL=app.js.map
+// Language and UI Functions
+function updateLanguage() {
+    const t = translations[currentLanguage];
+
+    // Set document direction for RTL languages
+    document.documentElement.dir = currentLanguage === 'he' ? 'rtl' : 'ltr';
+
+    // Update all text elements
+    document.getElementById('app-title').textContent = t.app_title;
+    document.getElementById('language-label').textContent = t.language_label;
+    document.getElementById('tab-lists').textContent = t.tab_lists;
+    document.getElementById('tab-summary').textContent = t.tab_summary;
+    document.getElementById('tab-items').textContent = t.tab_items;
+    document.getElementById('tab-archive').textContent = t.tab_archive;
+    document.getElementById('tab-settings').textContent = t.tab_settings;
+    document.getElementById('lists-title').textContent = t.lists_title;
+    document.getElementById('add-list-button').textContent = t.add_list;
+    document.getElementById('summary-title').textContent = t.summary_title;
+    document.getElementById('items-title').textContent = t.items_title;
+    document.getElementById('add-global-item-button').textContent = t.add_global_item;
+    document.getElementById('archive-title').textContent = t.archive_title;
+    document.getElementById('settings-title').textContent = t.settings_title;
+    document.getElementById('currency-label').textContent = t.currency_label;
+    document.getElementById('categories-title').textContent = t.categories_title;
+    document.getElementById('add-category-button').textContent = t.add_category;
+    document.getElementById('receipt-label').textContent = t.receipt_label;
+    document.getElementById('import-title').textContent = t.import_title;
+    document.getElementById('import-label').textContent = t.import_label;
+    document.getElementById('import-button').textContent = t.import_button;
+    document.getElementById('export-csv-button').textContent = t.export_csv;
+    document.getElementById('clear-data-button').textContent = t.clear_data;
+
+    // Update modal elements
+    document.getElementById('list-name-label').textContent = t.list_name_label;
+    document.getElementById('save-list').textContent = t.save;
+    document.getElementById('cancel-modal').textContent = t.cancel;
+    document.getElementById('item-name-label').textContent = t.item_name;
+    document.getElementById('item-category-label').textContent = t.item_category;
+    document.getElementById('item-quantity-label').textContent = t.item_quantity;
+    document.getElementById('item-unit-label').textContent = t.item_unit;
+    document.getElementById('item-price-label').textContent = t.item_price;
+    document.getElementById('item-price-basis-label').textContent = t.item_price_basis;
+    document.getElementById('item-notes-label').textContent = t.item_notes;
+    document.getElementById('save-item').textContent = t.save;
+    document.getElementById('cancel-item-modal').textContent = t.cancel;
+
+    // Update list details elements
+    document.getElementById('add-item-button').textContent = t.add_item;
+    document.getElementById('complete-list-button').textContent = t.complete_list;
+    document.getElementById('close-list-details').textContent = t.close;
+    document.getElementById('item-search').placeholder = t.search_placeholder;
+
+    // Update global item modal elements
+    document.getElementById('global-name-label').textContent = t.global_name;
+    document.getElementById('global-category-label').textContent = t.global_category;
+    document.getElementById('global-price-label').textContent = t.global_price;
+    document.getElementById('global-unit-label').textContent = t.global_unit;
+    document.getElementById('save-global-item').textContent = t.save;
+    document.getElementById('cancel-global-item-modal').textContent = t.cancel;
+
+    // Update undo/redo buttons
+    const undoBtn = document.getElementById('undo-button');
+    const redoBtn = document.getElementById('redo-button');
+    if (undoBtn) undoBtn.textContent = t.undo;
+    if (redoBtn) redoBtn.textContent = t.redo;
+
+    // Update toggle fullscreen button
+    const fullscreenBtn = document.getElementById('toggle-fullscreen');
+    if (fullscreenBtn) {
+        fullscreenBtn.textContent = listFullscreen ? t.restore : t.maximize;
+    }
+}
+
+// Tab switching
+function switchTab(tabName) {
+    // Update nav buttons
+    document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('active'));
+    document.getElementById(`tab-${tabName}`).classList.add('active');
+
+    // Update pages
+    document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+    document.getElementById(`page-${tabName}`).classList.add('active');
+
+    // Handle specific tab actions
+    switch(tabName) {
+        case 'lists':
+            renderLists();
+            break;
+        case 'summary':
+            renderSummary();
+            break;
+        case 'items':
+            renderGlobalItems();
+            break;
+        case 'archive':
+            renderArchive();
+            break;
+        case 'settings':
+            renderSettings();
+            break;
+    }
+}
+
+// Render functions
+function renderLists() {
+    const container = document.getElementById('list-container');
+    const t = translations[currentLanguage];
+
+    container.innerHTML = '';
+
+    data.lists.forEach(list => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+        li.dataset.listId = list.id;
+
+        const itemCount = list.items ? list.items.length : 0;
+        const checkedCount = list.items ? list.items.filter(item => item.isChecked).length : 0;
+
+        li.innerHTML = `
+            <div class="d-flex flex-column flex-grow-1">
+                <strong>${escapeHtml(list.name)}</strong>
+                <small class="text-muted">${checkedCount}/${itemCount} items</small>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-primary btn-sm" onclick="openListDetails('${list.id}')">${t.manage_items}</button>
+                <button class="btn btn-secondary btn-sm" onclick="editList('${list.id}')">${t.rename_list}</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteList('${list.id}')">${t.delete_list}</button>
+            </div>
+        `;
+
+        container.appendChild(li);
+    });
+}
+
+function renderSummary() {
+    const content = document.getElementById('summary-content');
+    const t = translations[currentLanguage];
+
+    let totalCost = 0;
+    let purchasedItems = [];
+    let missingItems = [];
+
+    data.lists.forEach(list => {
+        list.items.forEach(item => {
+            const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+            const itemData = {
+                name: globalItem ? globalItem.name : 'Unknown Item',
+                quantity: item.quantity,
+                price: item.estimatedPrice || 0,
+                list: list.name
+            };
+
+            if (item.isChecked) {
+                purchasedItems.push(itemData);
+                totalCost += itemData.price * itemData.quantity;
+            } else {
+                missingItems.push(itemData);
+            }
+        });
+    });
+
+    content.innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <h4>${t.purchased} (${purchasedItems.length})</h4>
+                <ul class="list-group">
+                    ${purchasedItems.map(item => `
+                        <li class="list-group-item">
+                            ${escapeHtml(item.name)} x${item.quantity} 
+                            <small class="text-muted">(${escapeHtml(item.list)})</small>
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+            <div class="col-md-6">
+                <h4>${t.missing} (${missingItems.length})</h4>
+                <ul class="list-group">
+                    ${missingItems.map(item => `
+                        <li class="list-group-item">
+                            ${escapeHtml(item.name)} x${item.quantity}
+                            <small class="text-muted">(${escapeHtml(item.list)})</small>
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        </div>
+        <div class="mt-3">
+            <h5>${t.total_cost}: ₪${totalCost.toFixed(2)}</h5>
+        </div>
+    `;
+}
+
+function renderGlobalItems() {
+    const container = document.getElementById('global-items-container');
+    const t = translations[currentLanguage];
+
+    container.innerHTML = '';
+
+    // Group items by category
+    const itemsByCategory = {};
+    data.globalItems.forEach(item => {
+        const categoryId = item.categoryId || 'other';
+        if (!itemsByCategory[categoryId]) {
+            itemsByCategory[categoryId] = [];
+        }
+        itemsByCategory[categoryId].push(item);
+    });
+
+    // Render each category
+    data.categories.forEach(category => {
+        const items = itemsByCategory[category.id] || [];
+        if (items.length === 0) return;
+
+        const categoryName = category.names[currentLanguage] || category.names.en || category.id;
+
+        const categoryHeader = document.createElement('div');
+        categoryHeader.className = 'category-heading';
+        categoryHeader.innerHTML = `<h5>${escapeHtml(categoryName)}</h5>`;
+        container.appendChild(categoryHeader);
+
+        items.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.dataset.itemId = item.id;
+
+            li.innerHTML = `
+                <div class="d-flex flex-column flex-grow-1">
+                    <strong>${escapeHtml(item.name)}</strong>
+                    <small class="text-muted">₪${item.estimatedPrice || 0} per ${item.priceUnit || 'piece'}</small>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-secondary btn-sm" onclick="editGlobalItem('${item.id}')">${t.edit_global_item}</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteGlobalItem('${item.id}')">Delete</button>
+                </div>
+            `;
+
+            container.appendChild(li);
+        });
+    });
+}
+
+function renderArchive() {
+    const content = document.getElementById('archive-content');
+    const t = translations[currentLanguage];
+
+    content.innerHTML = '';
+
+    if (data.archivedLists.length === 0) {
+        content.innerHTML = '<p class="text-muted">No archived lists</p>';
+        return;
+    }
+
+    data.archivedLists.forEach(list => {
+        const div = document.createElement('div');
+        div.className = 'card mb-3 archive-list';
+
+        const completedDate = list.completedAt ? new Date(list.completedAt).toLocaleDateString() : 'Unknown';
+        const itemCount = list.items ? list.items.length : 0;
+
+        div.innerHTML = `
+            <div class="card-body">
+                <h5 class="card-title">${escapeHtml(list.name)}</h5>
+                <p class="card-text">
+                    <small class="text-muted">Completed: ${completedDate} • ${itemCount} items</small>
+                </p>
+                <button class="btn btn-outline-primary btn-sm" onclick="viewArchivedList('${list.id}')">${t.archive_view}</button>
+            </div>
+        `;
+
+        content.appendChild(div);
+    });
+}
+
+function renderSettings() {
+    updateCategoryList();
+}
+
+function updateCategoryList() {
+    const container = document.getElementById('categories-container');
+    const t = translations[currentLanguage];
+
+    container.innerHTML = '';
+
+    data.categories.forEach(category => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+
+        const categoryName = category.names[currentLanguage] || category.names.en || category.id;
+
+        li.innerHTML = `
+            <span>${escapeHtml(categoryName)}</span>
+            <button class="btn btn-danger btn-sm" onclick="deleteCategory('${category.id}')">Delete</button>
+        `;
+
+        container.appendChild(li);
+    });
+}
+
+// Modal and interaction functions
+function openListDetails(listId) {
+    const list = data.lists.find(l => l.id === listId);
+    if (!list) return;
+
+    editingListId = listId;
+    document.getElementById('list-details-title').textContent = list.name;
+    document.getElementById('list-details-overlay').classList.remove('hidden');
+
+    if (listFullscreen) {
+        document.getElementById('list-details-overlay').classList.add('fullscreen');
+        document.getElementById('list-details').classList.add('fullscreen');
+    }
+
+    renderListItems();
+    updateUndoRedoButtons();
+}
+
+function renderListItems() {
+    const list = data.lists.find(l => l.id === editingListId);
+    if (!list) return;
+
+    const itemsContainer = document.getElementById('items-container');
+    const checkedContainer = document.getElementById('checked-items-container');
+    const t = translations[currentLanguage];
+
+    itemsContainer.innerHTML = '';
+    checkedContainer.innerHTML = '';
+
+    // Group items by category
+    const uncheckedItems = list.items.filter(item => !item.isChecked);
+    const checkedItems = list.items.filter(item => item.isChecked);
+
+    // Render unchecked items
+    const itemsByCategory = {};
+    uncheckedItems.forEach(item => {
+        const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+        const categoryId = globalItem ? globalItem.categoryId : 'other';
+        if (!itemsByCategory[categoryId]) {
+            itemsByCategory[categoryId] = [];
+        }
+        itemsByCategory[categoryId].push(item);
+    });
+
+    data.categories.forEach(category => {
+        const items = itemsByCategory[category.id] || [];
+        if (items.length === 0) return;
+
+        const categoryName = category.names[currentLanguage] || category.names.en || category.id;
+
+        const categoryHeader = document.createElement('div');
+        categoryHeader.className = 'category-heading';
+        categoryHeader.innerHTML = `
+            <h6>${escapeHtml(categoryName)}</h6>
+            <button class="btn btn-sm btn-outline-secondary" onclick="toggleCategoryItems('${category.id}', true)">${t.check_all}</button>
+        `;
+        itemsContainer.appendChild(categoryHeader);
+
+        items.forEach(item => {
+            itemsContainer.appendChild(createItemElement(item, list.id));
+        });
+    });
+
+    // Render checked items
+    if (checkedItems.length > 0) {
+        document.getElementById('checked-heading').textContent = `${t.purchased} (${checkedItems.length})`;
+        checkedItems.forEach(item => {
+            checkedContainer.appendChild(createItemElement(item, list.id));
+        });
+    } else {
+        document.getElementById('checked-heading').textContent = '';
+    }
+}
+
+function createItemElement(item, listId) {
+    const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+    const itemName = globalItem ? globalItem.name : 'Unknown Item';
+
+    const li = document.createElement('li');
+    li.className = 'list-group-item d-flex align-items-center';
+    li.dataset.itemId = item.id;
+
+    const isChecked = item.isChecked ? 'checked' : '';
+    const textStyle = item.isChecked ? 'text-decoration: line-through; opacity: 0.6;' : '';
+
+    li.innerHTML = `
+        <input type="checkbox" ${isChecked} onchange="toggleItem('${listId}', '${item.id}')" class="me-2">
+        <div class="flex-grow-1 item-text" style="${textStyle}">
+            <strong>${escapeHtml(itemName)}</strong>
+            ${item.quantity > 1 ? ` x${item.quantity}` : ''}
+            ${item.notes ? `<br><small class="text-muted">${escapeHtml(item.notes)}</small>` : ''}
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-sm btn-outline-secondary" onclick="editListItem('${listId}', '${item.id}')">Edit</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteListItem('${listId}', '${item.id}')">Delete</button>
+        </div>
+    `;
+
+    return li;
+}
+
+// Event handler functions
+function toggleItem(listId, itemId) {
+    const list = data.lists.find(l => l.id === listId);
+    const item = list.items.find(i => i.id === itemId);
+
+    item.isChecked = !item.isChecked;
+
+    saveData(true, 'update', `lists/${listId}/items/${itemId}`, { isChecked: item.isChecked });
+    renderListItems();
+}
+
+function editList(listId) {
+    const list = data.lists.find(l => l.id === listId);
+    if (!list) return;
+
+    editingListId = listId;
+    document.getElementById('modal-title').textContent = translations[currentLanguage].modal_edit_list;
+    document.getElementById('list-name-input').value = list.name;
+    document.getElementById('modal-overlay').classList.remove('hidden');
+}
+
+function deleteList(listId) {
+    if (!confirm(translations[currentLanguage].confirm_clear)) return;
+
+    data.lists = data.lists.filter(l => l.id !== listId);
+    saveData(true, 'delete', `lists/${listId}`, { id: listId });
+    renderLists();
+}
+
+function deleteGlobalItem(itemId) {
+    if (!confirm('Delete this item?')) return;
+
+    data.globalItems = data.globalItems.filter(i => i.id !== itemId);
+    saveData(true, 'delete', `globalItems/${itemId}`, { id: itemId });
+    renderGlobalItems();
+}
+
+function deleteListItem(listId, itemId) {
+    const list = data.lists.find(l => l.id === listId);
+    list.items = list.items.filter(i => i.id !== itemId);
+
+    saveData(true, 'delete', `lists/${listId}/items/${itemId}`, { id: itemId });
+    renderListItems();
+}
+
+function toggleCategoryItems(categoryId, checked) {
+    const list = data.lists.find(l => l.id === editingListId);
+
+    list.items.forEach(item => {
+        const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+        if (globalItem && globalItem.categoryId === categoryId) {
+            item.isChecked = checked;
+        }
+    });
+
+    saveData(true, 'update', `lists/${editingListId}`, list);
+    renderListItems();
+}
+
+// Utility functions
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+// Initialize the app
+async function initApp() {
+    try {
+        // Load data first
+        await loadData();
+
+        // Set up language
+        const savedLanguage = localStorage.getItem('language') || 'en';
+        currentLanguage = savedLanguage;
+        document.getElementById('language-select').value = currentLanguage;
+
+        // Update UI
+        updateLanguage();
+        switchTab('lists');
+
+        // Set up event listeners
+        setupEventListeners();
+
+        // Initialize collaborative features
+        await initializeCollaborativeFeatures();
+
+        // Check for direct list link
+        const urlParams = new URLSearchParams(window.location.search);
+        const listId = urlParams.get('list');
+        if (listId && data.lists.find(l => l.id === listId)) {
+            openListDetails(listId);
+        }
+
+    } catch (error) {
+        console.error('Failed to initialize app:', error);
+        showUpdateNotification('Failed to load app', 'error');
+    }
+}
+
+function setupEventListeners() {
+    // Language selector
+    document.getElementById('language-select').addEventListener('change', (e) => {
+        currentLanguage = e.target.value;
+        localStorage.setItem('language', currentLanguage);
+        updateLanguage();
+        refreshUI();
+    });
+
+    // Tab navigation
+    document.getElementById('tab-lists').addEventListener('click', () => switchTab('lists'));
+    document.getElementById('tab-summary').addEventListener('click', () => switchTab('summary'));
+    document.getElementById('tab-items').addEventListener('click', () => switchTab('items'));
+    document.getElementById('tab-archive').addEventListener('click', () => switchTab('archive'));
+    document.getElementById('tab-settings').addEventListener('click', () => switchTab('settings'));
+
+    // Add list button
+    document.getElementById('add-list-button').addEventListener('click', () => {
+        editingListId = null;
+        document.getElementById('modal-title').textContent = translations[currentLanguage].modal_new_list;
+        document.getElementById('list-name-input').value = '';
+        document.getElementById('modal-overlay').classList.remove('hidden');
+    });
+
+    // Save list
+    document.getElementById('save-list').addEventListener('click', () => {
+        const name = document.getElementById('list-name-input').value.trim();
+        if (!name) return;
+
+        if (editingListId) {
+            // Edit existing list
+            const list = data.lists.find(l => l.id === editingListId);
+            list.name = name;
+            saveData(true, 'update', `lists/${editingListId}`, { name });
+        } else {
+            // Create new list
+            const newList = {
+                id: generateId(),
+                name,
+                items: [],
+                createdAt: new Date().toISOString()
+            };
+            data.lists.push(newList);
+            saveData(true, 'create', 'lists', newList);
+        }
+
+        document.getElementById('modal-overlay').classList.add('hidden');
+        renderLists();
+    });
+
+    // Cancel modals
+    document.getElementById('cancel-modal').addEventListener('click', () => {
+        document.getElementById('modal-overlay').classList.add('hidden');
+    });
+
+    document.getElementById('cancel-item-modal').addEventListener('click', () => {
+        document.getElementById('item-modal-overlay').classList.add('hidden');
+    });
+
+    document.getElementById('cancel-global-item-modal').addEventListener('click', () => {
+        document.getElementById('global-item-modal-overlay').classList.add('hidden');
+    });
+
+    // Close list details
+    document.getElementById('close-list-details').addEventListener('click', () => {
+        document.getElementById('list-details-overlay').classList.add('hidden');
+        editingListId = null;
+    });
+
+    // Add global item
+    document.getElementById('add-global-item-button').addEventListener('click', () => {
+        editingGlobalItemId = null;
+        document.getElementById('global-item-modal-title').textContent = translations[currentLanguage].modal_new_global_item;
+        document.getElementById('global-name-input').value = '';
+        document.getElementById('global-price-input').value = '';
+        populateCategorySelects();
+        document.getElementById('global-item-modal-overlay').classList.remove('hidden');
+    });
+
+    // Save global item
+    document.getElementById('save-global-item').addEventListener('click', () => {
+        const name = document.getElementById('global-name-input').value.trim();
+        const categoryId = document.getElementById('global-category-select').value;
+        const price = parseFloat(document.getElementById('global-price-input').value) || 0;
+        const priceUnit = document.getElementById('global-unit-select').value;
+
+        if (!name || !categoryId) return;
+
+        if (editingGlobalItemId) {
+            // Edit existing item
+            const item = data.globalItems.find(i => i.id === editingGlobalItemId);
+            Object.assign(item, { name, categoryId, estimatedPrice: price, priceUnit });
+            saveData(true, 'update', `globalItems/${editingGlobalItemId}`, item);
+        } else {
+            // Create new item
+            const newItem = {
+                id: generateId(),
+                name,
+                categoryId,
+                estimatedPrice: price,
+                priceUnit,
+                createdAt: new Date().toISOString()
+            };
+            data.globalItems.push(newItem);
+            saveData(true, 'create', 'globalItems', newItem);
+        }
+
+        document.getElementById('global-item-modal-overlay').classList.add('hidden');
+        renderGlobalItems();
+        updateGlobalItemSuggestions();
+    });
+
+    // Clear data
+    document.getElementById('clear-data-button').addEventListener('click', async () => {
+        if (!confirm(translations[currentLanguage].confirm_clear)) return;
+
+        try {
+            await window.DataService.clearData();
+            data = {
+                lists: [],
+                globalItems: [],
+                categories: [],
+                archivedLists: [],
+                receipts: [],
+                revision: 0
+            };
+            await loadData(); // Reload to get default categories
+            refreshUI();
+            showUpdateNotification('Data cleared successfully', 'success');
+        } catch (error) {
+            console.error('Failed to clear data:', error);
+            showUpdateNotification('Failed to clear data', 'error');
+        }
+    });
+
+    // Undo/Redo buttons
+    const undoBtn = document.getElementById('undo-button');
+    const redoBtn = document.getElementById('redo-button');
+
+    if (undoBtn) {
+        undoBtn.addEventListener('click', undo);
+    }
+    if (redoBtn) {
+        redoBtn.addEventListener('click', redo);
+    }
+
+    // Item search
+    document.getElementById('item-search').addEventListener('input', (e) => {
+        itemSearchTerm = e.target.value.toLowerCase();
+        renderListItems();
+    });
+}
+
+function populateCategorySelects() {
+    const selects = [
+        document.getElementById('item-category-select'),
+        document.getElementById('global-category-select')
+    ];
+
+    selects.forEach(select => {
+        if (!select) return;
+
+        select.innerHTML = '';
+        data.categories.forEach(category => {
+            const option = document.createElement('option');
+            option.value = category.id;
+            option.textContent = category.names[currentLanguage] || category.names.en || category.id;
+            select.appendChild(option);
+        });
+    });
+}
+
+// Global functions for onclick handlers
+window.openListDetails = openListDetails;
+window.editList = editList;
+window.deleteList = deleteList;
+window.deleteGlobalItem = deleteGlobalItem;
+window.deleteListItem = deleteListItem;
+window.toggleItem = toggleItem;
+window.toggleCategoryItems = toggleCategoryItems;
+window.editGlobalItem = (itemId) => {
+    const item = data.globalItems.find(i => i.id === itemId);
+    if (!item) return;
+
+    editingGlobalItemId = itemId;
+    document.getElementById('global-item-modal-title').textContent = translations[currentLanguage].modal_edit_global_item;
+    document.getElementById('global-name-input').value = item.name;
+    document.getElementById('global-price-input').value = item.estimatedPrice || '';
+    document.getElementById('global-unit-select').value = item.priceUnit || 'piece';
+    populateCategorySelects();
+    document.getElementById('global-category-select').value = item.categoryId;
+    document.getElementById('global-item-modal-overlay').classList.remove('hidden');
+};
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', initApp);
