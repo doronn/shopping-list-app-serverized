@@ -35,7 +35,9 @@
         <section id="page-lists" class="page active">
             <div class="list-header d-flex justify-content-between align-items-center mb-3">
                 <h2 id="lists-title"></h2>
-                <button id="add-list-button" class="btn btn-primary btn-sm"></button>
+                <button id="add-list-button" class="btn btn-primary btn-sm">
+                    <i class="bi bi-plus-circle"></i> <span></span>
+                </button>
             </div>
             <ul id="list-container" class="list-group"></ul>
         </section>
@@ -53,7 +55,9 @@
         <section id="page-items" class="page">
             <h2 id="items-title"></h2>
             <div class="global-items-header mb-3">
-                <button id="add-global-item-button" class="btn btn-primary btn-sm"></button>
+                <button id="add-global-item-button" class="btn btn-primary btn-sm">
+                    <i class="bi bi-plus-circle"></i> <span></span>
+                </button>
             </div>
             <ul id="global-items-container" class="list-group"></ul>
         </section>
@@ -72,8 +76,11 @@
         <div class="categories-settings">
             <h3 id="categories-title"></h3>
             <div class="add-category-form">
+                <label for="new-category-input" id="new-category-label">New category name:</label>
                 <input type="text" id="new-category-input" />
-                <button id="add-category-button"></button>
+                <button id="add-category-button">
+                    <i class="bi bi-plus-circle"></i> <span></span>
+                </button>
             </div>
             <ul id="categories-container"></ul>
         </div>
@@ -84,14 +91,20 @@
             <label id="import-label" for="import-textarea"></label>
             <textarea id="import-textarea" rows="4" style="width:100%;"></textarea>
             <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
-                <button id="import-button"></button>
-                <button id="export-csv-button"></button>
+                <button id="import-button">
+                    <i class="bi bi-upload"></i> <span></span>
+                </button>
+                <button id="export-csv-button">
+                    <i class="bi bi-download"></i> <span></span>
+                </button>
             </div>
         </div>
 
         <!-- Clear data section -->
         <div class="clear-data-section" style="margin-top:1rem;">
-            <button id="clear-data-button"></button>
+            <button id="clear-data-button" class="btn btn-danger">
+                <i class="bi bi-trash"></i> <span></span>
+            </button>
         </div>
         </section>
     </main>
@@ -149,6 +162,7 @@
         <div id="list-details" class="modal">
             <h3 id="list-details-title"></h3>
             <!-- Search input to filter items -->
+            <label for="item-search" class="visually-hidden">Search items</label>
             <input type="text" id="item-search" placeholder="" />
             <div id="items-scroll" class="mb-3">
                 <ul id="items-container" class="list-group"></ul>
@@ -156,12 +170,24 @@
                 <ul id="checked-items-container" class="list-group"></ul>
             </div>
             <div class="list-details-actions">
-                <button id="add-item-button"></button>
-                <button id="complete-list-button"></button>
-                <button id="undo-button"></button>
-                <button id="redo-button"></button>
-                <button id="toggle-fullscreen"></button>
-                <button id="close-list-details"></button>
+                <button id="add-item-button" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> <span></span>
+                </button>
+                <button id="complete-list-button" class="btn btn-success">
+                    <i class="bi bi-check-circle"></i> <span></span>
+                </button>
+                <button id="undo-button" class="btn btn-secondary">
+                    <i class="bi bi-arrow-counterclockwise"></i> <span></span>
+                </button>
+                <button id="redo-button" class="btn btn-secondary">
+                    <i class="bi bi-arrow-clockwise"></i> <span></span>
+                </button>
+                <button id="toggle-fullscreen" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrows-fullscreen"></i> <span></span>
+                </button>
+                <button id="close-list-details" class="btn btn-outline-secondary">
+                    <i class="bi bi-x-circle"></i> <span></span>
+                </button>
             </div>
         </div>
     </div>

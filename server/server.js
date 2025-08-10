@@ -186,7 +186,9 @@ class UndoRedoManager {
       case 'delete':
         return {
           ...operation,
-          type: 'create'
+          type: 'create',
+          // Re-create using the full previous data snapshot if available
+          data: operation.previousData ? JSON.parse(JSON.stringify(operation.previousData)) : operation.data
         };
       case 'update':
         // For update, we need the previous state (handled when applying)
@@ -402,31 +404,41 @@ function applyOperation(operation, targetData = appData) {
 
 // Helper function to get previous data for undo operations
 function getPreviousDataForPath(path, previousState) {
-  const parts = path.split('/');
-  let current = previousState;
+  try {
+    const parts = (path || '').split('/');
+    if (!parts.length) return null;
 
-  for (let i = 0; i < parts.length - 1; i++) {
-    const part = parts[i];
-    if (part === 'lists') {
-      current = current.lists;
-    } else if (part === 'globalItems') {
-      current = current.globalItems;
-    } else if (part === 'categories') {
-      current = current.categories;
-    } else if (part === 'items') {
-      continue;
-    } else {
-      if (Array.isArray(current)) {
-        current = current.find(item => item.id === part);
-      } else if (current && current[part]) {
-        current = current[part];
+    if (parts[0] === 'lists') {
+      const listId = parts[1];
+      const list = (previousState.lists || []).find(l => l.id === listId);
+      if (!list) return null;
+      if (parts.length === 2) {
+        return JSON.parse(JSON.stringify(list));
       }
+      if (parts[2] === 'items' && parts[3]) {
+        const itemId = parts[3];
+        const item = (list.items || []).find(i => i.id === itemId);
+        return item ? JSON.parse(JSON.stringify(item)) : null;
+      }
+      return null;
     }
 
-    if (!current) break;
-  }
+    if (parts[0] === 'globalItems') {
+      const itemId = parts[1];
+      const item = (previousState.globalItems || []).find(i => i.id === itemId);
+      return item ? JSON.parse(JSON.stringify(item)) : null;
+    }
 
-  return current ? JSON.parse(JSON.stringify(current)) : null;
+    if (parts[0] === 'categories') {
+      const categoryId = parts[1];
+      const cat = (previousState.categories || []).find(c => c.id === categoryId);
+      return cat ? JSON.parse(JSON.stringify(cat)) : null;
+    }
+
+    return null;
+  } catch (e) {
+    return null;
+  }
 }
 
 // REST endpoint: GET /data – return the entire app state
@@ -452,12 +464,17 @@ app.put('/data', async (req, res) => {
 
     // Apply operational transforms to handle concurrent operations
     const transformedOps = [];
+    const recentOperationIds = new Set(appData.operations.map(op => op.id));
     const recentServerOps = appData.operations.filter(op =>
       op.timestamp > Date.now() - 30000 && op.clientId !== clientId
     );
 
     if (clientOps && clientOps.length > 0) {
       for (const clientOp of clientOps) {
+        // Skip duplicate operations already processed (prevents double-undo entries)
+        if (clientOp && clientOp.id && recentOperationIds.has(clientOp.id)) {
+          continue;
+        }
         let transformedOp = clientOp;
 
         // Transform against recent server operations
@@ -495,12 +512,17 @@ app.put('/data', async (req, res) => {
     appData.revision = oldRevision + 1;
     appData.lastModified = new Date().toISOString();
 
-    // Track operations
-    appData.operations.push(...transformedOps.map(op => ({
-      ...op,
-      revision: appData.revision,
-      serverTimestamp: Date.now()
-    })));
+    // Track operations (deduplicated)
+    transformedOps.forEach(op => {
+      if (!recentOperationIds.has(op.id)) {
+        appData.operations.push({
+          ...op,
+          revision: appData.revision,
+          serverTimestamp: Date.now()
+        });
+        recentOperationIds.add(op.id);
+      }
+    });
     appData.operations = appData.operations.slice(-200); // Keep more history
 
     scheduleSave();
@@ -774,6 +796,9 @@ io.on('connection', socket => {
         serverTimestamp: Date.now(),
         clientId: clientId
       };
+
+      // Capture previous data for reliable undo if not supplied by client
+      op.previousData = op.previousData || getPreviousDataForPath(op.path, appData);
 
       // Transform against recent operations
       const recentOps = appData.operations.filter(serverOp =>

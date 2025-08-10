@@ -125,11 +125,8 @@ const DataService = {
                     this.connectedUsers = serverData.connectedUsers || [];
                     this.activeEditors = serverData.activeEditors || {};
 
-                    // Update undo/redo state from server
-                    this.serverUndoAvailable = serverData.undoAvailable || false;
-                    this.serverRedoAvailable = serverData.redoAvailable || false;
-                    this.serverUndoDescription = serverData.undoDescription || null;
-                    this.serverRedoDescription = serverData.redoDescription || null;
+                    // Refresh undo/redo state explicitly (GET /data may omit it)
+                    try { await this.refreshUndoRedoState(); } catch (_) {}
 
                     return serverData;
                 }
@@ -145,6 +142,28 @@ const DataService = {
         }
 
         return this.getLocalStorageData();
+    },
+
+    async refreshUndoRedoState() {
+        if (!this.useServer || !this.serverBaseUrl) return;
+        try {
+            const resp = await fetch(`${this.serverBaseUrl}/undo-status/${this.clientId}`);
+            if (!resp.ok) return;
+            const status = await resp.json();
+            this.serverUndoAvailable = !!status.undoAvailable;
+            this.serverRedoAvailable = !!status.redoAvailable;
+            this.serverUndoDescription = status.undoDescription || null;
+            this.serverRedoDescription = status.redoDescription || null;
+
+            if (typeof window.onUndoRedoStateChanged === 'function') {
+                window.onUndoRedoStateChanged({
+                    undoAvailable: this.serverUndoAvailable,
+                    redoAvailable: this.serverRedoAvailable,
+                    undoDescription: this.serverUndoDescription,
+                    redoDescription: this.serverRedoDescription
+                });
+            }
+        } catch (_) { /* ignore */ }
     },
 
     getLocalStorageData() {
@@ -266,7 +285,7 @@ const DataService = {
 
     // Server-side undo/redo functions
     async performUndo() {
-        if (!this.useServer || !this.serverUndoAvailable) {
+        if (!this.useServer) {
             return null;
         }
 
@@ -304,7 +323,7 @@ const DataService = {
     },
 
     async performRedo() {
-        if (!this.useServer || !this.serverRedoAvailable) {
+        if (!this.useServer) {
             return null;
         }
 
@@ -430,6 +449,9 @@ const DataService = {
 
             // Send initial presence
             this.updatePresence('connected');
+
+            // Refresh undo/redo state on connect
+            this.refreshUndoRedoState();
         });
 
         this.socket.on('disconnect', () => {

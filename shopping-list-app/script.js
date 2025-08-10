@@ -182,18 +182,12 @@ let currentEditingContext = null;
 
 let currentLanguage = 'en';
 let editingListId = null;
-let editingItemListId = null;
-let editingItemId = null;
 let itemSearchTerm = '';
 let editingGlobalItemId = null;
-let editingArchive = false;
 const isMobile = /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.test(navigator.userAgent);
-let collapsedCategories = JSON.parse(localStorage.getItem('collapsedCategories') || '{}');
 let listFullscreen = localStorage.getItem('listFullscreen') === 'true';
 
 const clone = obj => JSON.parse(JSON.stringify(obj));
-let undoStack = [];
-let redoStack = [];
 let lastSavedData = null;
 
 // Update datalist options for global item suggestions
@@ -755,21 +749,67 @@ function updateLanguage() {
     document.getElementById('tab-archive').textContent = t.tab_archive;
     document.getElementById('tab-settings').textContent = t.tab_settings;
     document.getElementById('lists-title').textContent = t.lists_title;
-    document.getElementById('add-list-button').textContent = t.add_list;
+
+    // Update buttons with icons - use span elements for text
+    const addListBtn = document.getElementById('add-list-button');
+    if (addListBtn && addListBtn.querySelector('span')) {
+        addListBtn.querySelector('span').textContent = t.add_list;
+    } else if (addListBtn) {
+        addListBtn.textContent = t.add_list;
+    }
+
     document.getElementById('summary-title').textContent = t.summary_title;
     document.getElementById('items-title').textContent = t.items_title;
-    document.getElementById('add-global-item-button').textContent = t.add_global_item;
+
+    const addGlobalBtn = document.getElementById('add-global-item-button');
+    if (addGlobalBtn && addGlobalBtn.querySelector('span')) {
+        addGlobalBtn.querySelector('span').textContent = t.add_global_item;
+    } else if (addGlobalBtn) {
+        addGlobalBtn.textContent = t.add_global_item;
+    }
+
     document.getElementById('archive-title').textContent = t.archive_title;
     document.getElementById('settings-title').textContent = t.settings_title;
     document.getElementById('currency-label').textContent = t.currency_label;
     document.getElementById('categories-title').textContent = t.categories_title;
-    document.getElementById('add-category-button').textContent = t.add_category;
+
+    const addCategoryBtn = document.getElementById('add-category-button');
+    if (addCategoryBtn && addCategoryBtn.querySelector('span')) {
+        addCategoryBtn.querySelector('span').textContent = t.add_category;
+    } else if (addCategoryBtn) {
+        addCategoryBtn.textContent = t.add_category;
+    }
+
+    // Add label for new category input
+    const newCategoryLabel = document.getElementById('new-category-label');
+    if (newCategoryLabel) {
+        newCategoryLabel.textContent = t.add_category;
+    }
+
     document.getElementById('receipt-label').textContent = t.receipt_label;
     document.getElementById('import-title').textContent = t.import_title;
     document.getElementById('import-label').textContent = t.import_label;
-    document.getElementById('import-button').textContent = t.import_button;
-    document.getElementById('export-csv-button').textContent = t.export_csv;
-    document.getElementById('clear-data-button').textContent = t.clear_data;
+
+    const importBtn = document.getElementById('import-button');
+    if (importBtn && importBtn.querySelector('span')) {
+        importBtn.querySelector('span').textContent = t.import_button;
+    } else if (importBtn) {
+        importBtn.textContent = t.import_button;
+    }
+
+    const exportBtn = document.getElementById('export-csv-button');
+    if (exportBtn && exportBtn.querySelector('span')) {
+        exportBtn.querySelector('span').textContent = t.export_csv;
+    } else if (exportBtn) {
+        exportBtn.textContent = t.export_csv;
+    }
+
+    const clearBtn = document.getElementById('clear-data-button');
+    if (clearBtn && clearBtn.querySelector('span')) {
+        clearBtn.querySelector('span').textContent = t.clear_data;
+    } else if (clearBtn) {
+        clearBtn.textContent = t.clear_data;
+    }
 
     // Update modal elements
     document.getElementById('list-name-label').textContent = t.list_name_label;
@@ -786,9 +826,27 @@ function updateLanguage() {
     document.getElementById('cancel-item-modal').textContent = t.cancel;
 
     // Update list details elements
-    document.getElementById('add-item-button').textContent = t.add_item;
-    document.getElementById('complete-list-button').textContent = t.complete_list;
-    document.getElementById('close-list-details').textContent = t.close;
+    const addItemBtn = document.getElementById('add-item-button');
+    if (addItemBtn && addItemBtn.querySelector('span')) {
+        addItemBtn.querySelector('span').textContent = t.add_item;
+    } else if (addItemBtn) {
+        addItemBtn.textContent = t.add_item;
+    }
+
+    const completeBtn = document.getElementById('complete-list-button');
+    if (completeBtn && completeBtn.querySelector('span')) {
+        completeBtn.querySelector('span').textContent = t.complete_list;
+    } else if (completeBtn) {
+        completeBtn.textContent = t.complete_list;
+    }
+
+    const closeBtn = document.getElementById('close-list-details');
+    if (closeBtn && closeBtn.querySelector('span')) {
+        closeBtn.querySelector('span').textContent = t.close;
+    } else if (closeBtn) {
+        closeBtn.textContent = t.close;
+    }
+
     document.getElementById('item-search').placeholder = t.search_placeholder;
 
     // Update global item modal elements
@@ -802,13 +860,30 @@ function updateLanguage() {
     // Update undo/redo buttons
     const undoBtn = document.getElementById('undo-button');
     const redoBtn = document.getElementById('redo-button');
-    if (undoBtn) undoBtn.textContent = t.undo;
-    if (redoBtn) redoBtn.textContent = t.redo;
+    if (undoBtn) {
+        if (undoBtn.querySelector('span')) {
+            undoBtn.querySelector('span').textContent = t.undo;
+        } else {
+            undoBtn.textContent = t.undo;
+        }
+    }
+    if (redoBtn) {
+        if (redoBtn.querySelector('span')) {
+            redoBtn.querySelector('span').textContent = t.redo;
+        } else {
+            redoBtn.textContent = t.redo;
+        }
+    }
 
     // Update toggle fullscreen button
     const fullscreenBtn = document.getElementById('toggle-fullscreen');
     if (fullscreenBtn) {
-        fullscreenBtn.textContent = listFullscreen ? t.restore : t.maximize;
+        const text = listFullscreen ? t.restore : t.maximize;
+        if (fullscreenBtn.querySelector('span')) {
+            fullscreenBtn.querySelector('span').textContent = text;
+        } else {
+            fullscreenBtn.textContent = text;
+        }
     }
 }
 
@@ -1138,15 +1213,25 @@ function createItemElement(item, listId) {
     return li;
 }
 
-// Event handler functions
-function toggleItem(listId, itemId) {
-    const list = data.lists.find(l => l.id === listId);
-    const item = list.items.find(i => i.id === itemId);
+// Add missing functions for complete functionality
 
-    item.isChecked = !item.isChecked;
+// Safely escape HTML to prevent XSS in dynamic UI strings
+function escapeHtml(value) {
+    if (value == null) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
 
-    saveData(true, 'update', `lists/${listId}/items/${itemId}`, { isChecked: item.isChecked });
-    renderListItems();
+// ID generator (use DataService if available to keep IDs consistent)
+function generateId() {
+    if (window.DataService && typeof window.DataService.generateId === 'function') {
+        return window.DataService.generateId();
+    }
+    return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
 function editList(listId) {
@@ -1155,58 +1240,318 @@ function editList(listId) {
 
     editingListId = listId;
     document.getElementById('modal-title').textContent = translations[currentLanguage].modal_edit_list;
-    document.getElementById('list-name-input').value = list.name;
+    document.getElementById('list-name-input').value = list.name || '';
     document.getElementById('modal-overlay').classList.remove('hidden');
 }
 
 function deleteList(listId) {
-    if (!confirm(translations[currentLanguage].confirm_clear)) return;
+    const list = data.lists.find(l => l.id === listId);
+    if (!list) return;
+    if (!confirm('Delete this list?')) return;
 
     data.lists = data.lists.filter(l => l.id !== listId);
     saveData(true, 'delete', `lists/${listId}`, { id: listId });
+
+    // If deleting the list being viewed, close the details overlay
+    if (editingListId === listId) {
+        document.getElementById('list-details-overlay').classList.add('hidden');
+        editingListId = null;
+    }
     renderLists();
+    renderSummary();
 }
 
 function deleteGlobalItem(itemId) {
-    if (!confirm('Delete this item?')) return;
+    const item = data.globalItems.find(i => i.id === itemId);
+    if (!item) return;
+    if (!confirm('Delete this global item?')) return;
 
     data.globalItems = data.globalItems.filter(i => i.id !== itemId);
     saveData(true, 'delete', `globalItems/${itemId}`, { id: itemId });
     renderGlobalItems();
+    updateGlobalItemSuggestions();
 }
 
 function deleteListItem(listId, itemId) {
     const list = data.lists.find(l => l.id === listId);
-    list.items = list.items.filter(i => i.id !== itemId);
-
+    if (!list) return;
+    list.items = (list.items || []).filter(i => i.id !== itemId);
     saveData(true, 'delete', `lists/${listId}/items/${itemId}`, { id: itemId });
     renderListItems();
 }
 
-function toggleCategoryItems(categoryId, checked) {
-    const list = data.lists.find(l => l.id === editingListId);
+function toggleItem(listId, itemId) {
+    const list = data.lists.find(l => l.id === listId);
+    if (!list) return;
+    const item = (list.items || []).find(i => i.id === itemId);
+    if (!item) return;
+    item.isChecked = !item.isChecked;
+    saveData(true, 'update', `lists/${listId}/items/${itemId}`, { id: itemId, isChecked: item.isChecked });
+    renderListItems();
+    renderSummary();
+}
 
-    list.items.forEach(item => {
-        const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
-        if (globalItem && globalItem.categoryId === categoryId) {
-            item.isChecked = checked;
+function toggleCategoryItems(categoryId, checkAll) {
+    const list = data.lists.find(l => l.id === editingListId);
+    if (!list) return;
+    const affectedItems = (list.items || []).filter(it => {
+        const globalItem = data.globalItems.find(g => g.id === it.globalItemId);
+        return (globalItem ? (globalItem.categoryId || 'other') : 'other') === categoryId && (!!checkAll !== !!it.isChecked);
+    });
+
+    affectedItems.forEach(it => {
+        it.isChecked = !!checkAll;
+        saveData(true, 'update', `lists/${list.id}/items/${it.id}`, { id: it.id, isChecked: it.isChecked });
+    });
+
+    renderListItems();
+    renderSummary();
+}
+function editListItem(listId, itemId) {
+    const list = data.lists.find(l => l.id === listId);
+    const item = list?.items.find(i => i.id === itemId);
+    if (!item) return;
+
+    // Set up item modal for editing
+    document.getElementById('item-modal-title').textContent = translations[currentLanguage].item_modal_edit;
+
+    // Find the global item to get the name
+    const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+    document.getElementById('item-name-input').value = globalItem ? globalItem.name : '';
+    document.getElementById('item-quantity-input').value = item.quantity || 1;
+    document.getElementById('item-price-input').value = item.estimatedPrice || 0;
+    document.getElementById('item-price-basis-input').value = item.priceBasisQuantity || 1;
+    document.getElementById('item-notes-input').value = item.notes || '';
+
+    // Populate categories and set current category
+    populateCategorySelects();
+    if (globalItem) {
+        document.getElementById('item-category-select').value = globalItem.categoryId || '';
+        document.getElementById('item-unit-select').value = globalItem.priceUnit || 'piece';
+    }
+
+    // Store current editing context
+    editingListId = listId;
+    window.editingItemId = itemId;
+
+    document.getElementById('item-modal-overlay').classList.remove('hidden');
+}
+
+function viewArchivedList(listId) {
+    const list = data.archivedLists.find(l => l.id === listId);
+    if (!list) return;
+
+    // Use the same list details view but in read-only mode
+    editingListId = listId;
+    document.getElementById('list-details-title').textContent = `${list.name} (Archived)`;
+    document.getElementById('list-details-overlay').classList.remove('hidden');
+
+    if (listFullscreen) {
+        document.getElementById('list-details-overlay').classList.add('fullscreen');
+        document.getElementById('list-details').classList.add('fullscreen');
+    }
+
+    // Render archived list items (read-only)
+    renderArchivedListItems(list);
+}
+
+function renderArchivedListItems(list) {
+    const itemsContainer = document.getElementById('items-container');
+    const checkedContainer = document.getElementById('checked-items-container');
+    const t = translations[currentLanguage];
+
+    itemsContainer.innerHTML = '';
+    checkedContainer.innerHTML = '';
+
+    // Hide action buttons for archived lists
+    const actionButtons = document.querySelectorAll('#list-details .list-details-actions button');
+    actionButtons.forEach(btn => {
+        if (btn.id !== 'close-list-details' && btn.id !== 'toggle-fullscreen') {
+            btn.style.display = 'none';
         }
     });
 
-    saveData(true, 'update', `lists/${editingListId}`, list);
+    // Group items by category
+    const uncheckedItems = list.items.filter(item => !item.isChecked);
+    const checkedItems = list.items.filter(item => item.isChecked);
+
+    // Render unchecked items
+    const itemsByCategory = {};
+    uncheckedItems.forEach(item => {
+        const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+        const categoryId = globalItem ? globalItem.categoryId : 'other';
+        if (!itemsByCategory[categoryId]) {
+            itemsByCategory[categoryId] = [];
+        }
+        itemsByCategory[categoryId].push(item);
+    });
+
+    data.categories.forEach(category => {
+        const items = itemsByCategory[category.id] || [];
+        if (items.length === 0) return;
+
+        const categoryName = category.names[currentLanguage] || category.names.en || category.id;
+
+        const categoryHeader = document.createElement('div');
+        categoryHeader.className = 'category-heading';
+        categoryHeader.innerHTML = `<h6>${escapeHtml(categoryName)}</h6>`;
+        itemsContainer.appendChild(categoryHeader);
+
+        items.forEach(item => {
+            itemsContainer.appendChild(createArchivedItemElement(item));
+        });
+    });
+
+    // Render checked items
+    if (checkedItems.length > 0) {
+        document.getElementById('checked-heading').textContent = `${t.purchased} (${checkedItems.length})`;
+        checkedItems.forEach(item => {
+            checkedContainer.appendChild(createArchivedItemElement(item));
+        });
+    } else {
+        document.getElementById('checked-heading').textContent = '';
+    }
+}
+
+function createArchivedItemElement(item) {
+    const globalItem = data.globalItems.find(g => g.id === item.globalItemId);
+    const itemName = globalItem ? globalItem.name : 'Unknown Item';
+
+    const li = document.createElement('li');
+    li.className = 'list-group-item d-flex align-items-center';
+    li.dataset.itemId = item.id;
+
+    const isChecked = item.isChecked ? 'checked' : '';
+    const textStyle = item.isChecked ? 'text-decoration: line-through; opacity: 0.6;' : '';
+
+    li.innerHTML = `
+        <input type="checkbox" ${isChecked} disabled class="me-2">
+        <div class="flex-grow-1 item-text" style="${textStyle}">
+            <strong>${escapeHtml(itemName)}</strong>
+            ${item.quantity > 1 ? ` x${item.quantity}` : ''}
+            ${item.notes ? `<br><small class="text-muted">${escapeHtml(item.notes)}</small>` : ''}
+        </div>
+    `;
+
+    return li;
+}
+
+function deleteCategory(categoryId) {
+    const t = translations[currentLanguage];
+    if (!confirm(`Delete this category? Items in this category will be moved to "Other".`)) return;
+
+    // Move items to "other" category
+    data.globalItems.forEach(item => {
+        if (item.categoryId === categoryId) {
+            item.categoryId = 'other';
+        }
+    });
+
+    // Remove the category
+    data.categories = data.categories.filter(c => c.id !== categoryId);
+
+    saveData(true, 'delete', `categories/${categoryId}`, { id: categoryId });
+    updateCategoryList();
+    renderGlobalItems();
+}
+
+// Add missing event listeners for item modal
+function setupItemModalListeners() {
+    const saveItemBtn = document.getElementById('save-item');
+    const itemNameInput = document.getElementById('item-name-input');
+
+    if (saveItemBtn) {
+        saveItemBtn.addEventListener('click', saveItemFromModal);
+    }
+
+    if (itemNameInput) {
+        itemNameInput.addEventListener('input', handleItemNameInput);
+    }
+}
+
+function saveItemFromModal() {
+    const name = document.getElementById('item-name-input').value.trim();
+    const categoryId = document.getElementById('item-category-select').value;
+    const quantity = parseInt(document.getElementById('item-quantity-input').value) || 1;
+    const priceUnit = document.getElementById('item-unit-select').value;
+    const estimatedPrice = parseFloat(document.getElementById('item-price-input').value) || 0;
+    const priceBasisQuantity = parseFloat(document.getElementById('item-price-basis-input').value) || 1;
+    const notes = document.getElementById('item-notes-input').value.trim();
+
+    if (!name || !categoryId) return;
+
+    const list = data.lists.find(l => l.id === editingListId);
+    if (!list) return;
+
+    if (window.editingItemId) {
+        // Edit existing item
+        const item = list.items.find(i => i.id === window.editingItemId);
+        if (item) {
+            // Find or create global item
+            let globalItem = data.globalItems.find(g => g.name.toLowerCase() === name.toLowerCase());
+            if (!globalItem) {
+                globalItem = {
+                    id: generateId(),
+                    name,
+                    categoryId,
+                    estimatedPrice,
+                    priceUnit,
+                    createdAt: new Date().toISOString()
+                };
+                data.globalItems.push(globalItem);
+            }
+
+            // Update item
+            Object.assign(item, {
+                globalItemId: globalItem.id,
+                quantity,
+                estimatedPrice,
+                priceBasisQuantity,
+                notes
+            });
+
+            saveData(true, 'update', `lists/${editingListId}/items/${window.editingItemId}`, item);
+        }
+        window.editingItemId = null;
+    } else {
+        // Create new item
+        let globalItem = data.globalItems.find(g => g.name.toLowerCase() === name.toLowerCase());
+        if (!globalItem) {
+            globalItem = {
+                id: generateId(),
+                name,
+                categoryId,
+                estimatedPrice,
+                priceUnit,
+                createdAt: new Date().toISOString()
+            };
+            data.globalItems.push(globalItem);
+        }
+
+        const newItem = {
+            id: generateId(),
+            globalItemId: globalItem.id,
+            quantity,
+            estimatedPrice,
+            priceBasisQuantity,
+            notes,
+            isChecked: false,
+            addedAt: new Date().toISOString()
+        };
+
+        list.items.push(newItem);
+        saveData(true, 'create', `lists/${editingListId}/items`, newItem);
+    }
+
+    document.getElementById('item-modal-overlay').classList.add('hidden');
     renderListItems();
+    updateGlobalItemSuggestions();
 }
 
-// Utility functions
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
+// Global functions for onclick handlers (continued)
+window.editListItem = editListItem;
+window.viewArchivedList = viewArchivedList;
+window.deleteCategory = deleteCategory;
 
 // Initialize the app
 async function initApp() {
@@ -1309,7 +1654,34 @@ function setupEventListeners() {
     document.getElementById('close-list-details').addEventListener('click', () => {
         document.getElementById('list-details-overlay').classList.add('hidden');
         editingListId = null;
+        // Show action buttons again when closing
+        const actionButtons = document.querySelectorAll('#list-details .list-details-actions button');
+        actionButtons.forEach(btn => {
+            btn.style.display = '';
+        });
     });
+
+    // Add item to list
+    document.getElementById('add-item-button').addEventListener('click', () => {
+        document.getElementById('item-modal-title').textContent = translations[currentLanguage].item_modal_new;
+        document.getElementById('item-name-input').value = '';
+        document.getElementById('item-quantity-input').value = 1;
+        document.getElementById('item-price-input').value = 0;
+        document.getElementById('item-price-basis-input').value = 1;
+        document.getElementById('item-notes-input').value = '';
+        populateCategorySelects();
+        window.editingItemId = null;
+        document.getElementById('item-modal-overlay').classList.remove('hidden');
+    });
+
+    // Save item
+    document.getElementById('save-item').addEventListener('click', saveItemFromModal);
+
+    // Item name input handling
+    const itemNameInput = document.getElementById('item-name-input');
+    if (itemNameInput) {
+        itemNameInput.addEventListener('input', handleItemNameInput);
+    }
 
     // Add global item
     document.getElementById('add-global-item-button').addEventListener('click', () => {
@@ -1354,6 +1726,31 @@ function setupEventListeners() {
         updateGlobalItemSuggestions();
     });
 
+    // Add category functionality
+    const addCategoryBtn = document.getElementById('add-category-button');
+    const newCategoryInput = document.getElementById('new-category-input');
+
+    if (addCategoryBtn) {
+        addCategoryBtn.addEventListener('click', () => {
+            const name = newCategoryInput.value.trim();
+            if (!name) return;
+
+            const newCategory = {
+                id: generateId(),
+                names: {
+                    en: name,
+                    he: name
+                }
+            };
+
+            data.categories.push(newCategory);
+            saveData(true, 'create', 'categories', newCategory);
+            newCategoryInput.value = '';
+            updateCategoryList();
+            renderGlobalItems();
+        });
+    }
+
     // Clear data
     document.getElementById('clear-data-button').addEventListener('click', async () => {
         if (!confirm(translations[currentLanguage].confirm_clear)) return;
@@ -1386,6 +1783,28 @@ function setupEventListeners() {
     }
     if (redoBtn) {
         redoBtn.addEventListener('click', redo);
+    }
+
+    // Toggle fullscreen
+    const fullscreenBtn = document.getElementById('toggle-fullscreen');
+    if (fullscreenBtn) {
+        fullscreenBtn.addEventListener('click', () => {
+            listFullscreen = !listFullscreen;
+            localStorage.setItem('listFullscreen', listFullscreen.toString());
+
+            const overlay = document.getElementById('list-details-overlay');
+            const details = document.getElementById('list-details');
+
+            if (listFullscreen) {
+                overlay.classList.add('fullscreen');
+                details.classList.add('fullscreen');
+            } else {
+                overlay.classList.remove('fullscreen');
+                details.classList.remove('fullscreen');
+            }
+
+            updateLanguage(); // Update button text
+        });
     }
 
     // Item search
