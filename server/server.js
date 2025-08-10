@@ -23,60 +23,280 @@ let appData = {
 const connectedUsers = new Map();
 const activeEditors = new Map(); // Track who's editing what
 const pendingOperations = new Map(); // Track operations awaiting confirmation
+const clientUndoStacks = new Map(); // Per-client undo stacks
+const clientRedoStacks = new Map(); // Per-client redo stacks
 
-// Aggregate Firebase writes to reduce churn
-let pendingChangeCount = 0;
-let saveTimer = null;
-const SAVE_INTERVAL_MS = 10000; // commit every 10s
-const SAVE_OPERATION_THRESHOLD = 20; // or after 20 ops
-
-async function flushPendingSaves() {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
+// Enhanced operational transform system
+class OperationTransform {
+  static transform(op1, op2) {
+    // Transform two concurrent operations so they can be applied in any order
+    if (op1.path === op2.path) {
+      // Same path - handle specific conflicts
+      return this.transformSamePath(op1, op2);
+    } else if (this.pathsIntersect(op1.path, op2.path)) {
+      // Related paths - handle hierarchical conflicts
+      return this.transformRelatedPaths(op1, op2);
+    } else {
+      // Independent operations - no transform needed
+      return [op1, op2];
+    }
   }
-  if (!pendingChangeCount) return;
-  pendingChangeCount = 0;
-  try {
-    await saveData(appData);
-  } catch (err) {
-    console.error('Failed to persist data:', err);
+
+  static transformSamePath(op1, op2) {
+    // Handle operations on the same exact path
+    if (op1.type === 'update' && op2.type === 'update') {
+      // Merge updates by preferring the more recent one but preserving intentional changes
+      const merged = this.mergeUpdates(op1, op2);
+      return [merged, null]; // Second operation is absorbed
+    } else if (op1.type === 'delete' || op2.type === 'delete') {
+      // Delete wins over other operations
+      const deleteOp = op1.type === 'delete' ? op1 : op2;
+      return [deleteOp, null];
+    } else if (op1.type === 'create' && op2.type === 'create') {
+      // Merge creates by combining data
+      const merged = this.mergeCreates(op1, op2);
+      return [merged, null];
+    }
+
+    // Default: prefer the more recent operation
+    return op1.timestamp > op2.timestamp ? [op1, null] : [op2, null];
+  }
+
+  static transformRelatedPaths(op1, op2) {
+    // Handle operations on related paths (e.g., list and list item)
+    const [parent1, child1] = this.splitPath(op1.path);
+    const [parent2, child2] = this.splitPath(op2.path);
+
+    if (parent1 === parent2) {
+      // Same parent, different children - both can proceed
+      return [op1, op2];
+    }
+
+    // For now, allow both operations
+    return [op1, op2];
+  }
+
+  static mergeUpdates(op1, op2) {
+    const mergedData = { ...op1.data };
+
+    // Smart merge based on field types
+    Object.keys(op2.data).forEach(key => {
+      if (key === 'isChecked') {
+        // For checked state, prefer the more recent explicit change
+        mergedData[key] = op2.data[key];
+      } else if (key === 'quantity') {
+        // For quantity, prefer the larger value (user likely intended to increase)
+        mergedData[key] = Math.max(op1.data[key] || 0, op2.data[key] || 0);
+      } else if (key === 'notes') {
+        // For notes, concatenate if both exist
+        const notes1 = op1.data[key] || '';
+        const notes2 = op2.data[key] || '';
+        if (notes1 && notes2 && notes1 !== notes2) {
+          mergedData[key] = `${notes1}; ${notes2}`;
+        } else {
+          mergedData[key] = notes2 || notes1;
+        }
+      } else {
+        // Default: use the more recent value
+        mergedData[key] = op2.data[key];
+      }
+    });
+
+    return {
+      ...op2,
+      data: mergedData,
+      description: `Merged: ${op1.description} + ${op2.description}`,
+      merged: true
+    };
+  }
+
+  static mergeCreates(op1, op2) {
+    // If creating the same item, merge the data
+    if (op1.data.id === op2.data.id) {
+      return {
+        ...op2,
+        data: { ...op1.data, ...op2.data },
+        description: `Merged creation: ${op1.description} + ${op2.description}`,
+        merged: true
+      };
+    }
+
+    // Different items - keep the more recent one
+    return op2.timestamp > op1.timestamp ? op2 : op1;
+  }
+
+  static pathsIntersect(path1, path2) {
+    const parts1 = path1.split('/');
+    const parts2 = path2.split('/');
+
+    // Check if one path is a parent of the other
+    const minLength = Math.min(parts1.length, parts2.length);
+    for (let i = 0; i < minLength; i++) {
+      if (parts1[i] !== parts2[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static splitPath(path) {
+    const parts = path.split('/');
+    if (parts.length <= 1) return [path, null];
+    return [parts.slice(0, -1).join('/'), parts[parts.length - 1]];
   }
 }
 
-function scheduleSave() {
-  pendingChangeCount++;
-  if (pendingChangeCount >= SAVE_OPERATION_THRESHOLD) {
-    flushPendingSaves();
-    return;
+// Enhanced undo/redo system
+class UndoRedoManager {
+  static addOperation(clientId, operation, description) {
+    if (!clientUndoStacks.has(clientId)) {
+      clientUndoStacks.set(clientId, []);
+      clientRedoStacks.set(clientId, []);
+    }
+
+    const undoStack = clientUndoStacks.get(clientId);
+    const redoStack = clientRedoStacks.get(clientId);
+
+    // Add to undo stack
+    undoStack.push({
+      operation,
+      description,
+      timestamp: Date.now(),
+      inverseOperation: this.createInverseOperation(operation)
+    });
+
+    // Limit stack size
+    if (undoStack.length > 50) {
+      undoStack.shift();
+    }
+
+    // Clear redo stack when new operation is added
+    redoStack.length = 0;
   }
-  if (!saveTimer) {
-    saveTimer = setTimeout(flushPendingSaves, SAVE_INTERVAL_MS);
+
+  static createInverseOperation(operation) {
+    // Create the inverse operation for undo
+    switch (operation.type) {
+      case 'create':
+        return {
+          ...operation,
+          type: 'delete',
+          data: { id: operation.data.id }
+        };
+      case 'delete':
+        return {
+          ...operation,
+          type: 'create',
+          // Re-create using the full previous data snapshot if available
+          data: operation.previousData ? JSON.parse(JSON.stringify(operation.previousData)) : operation.data
+        };
+      case 'update':
+        // For update, we need the previous state (handled when applying)
+        return {
+          ...operation,
+          type: 'update',
+          data: operation.previousData || {}
+        };
+      default:
+        return operation;
+    }
+  }
+
+  static canUndo(clientId) {
+    const stack = clientUndoStacks.get(clientId);
+    return stack && stack.length > 0;
+  }
+
+  static canRedo(clientId) {
+    const stack = clientRedoStacks.get(clientId);
+    return stack && stack.length > 0;
+  }
+
+  static getUndoDescription(clientId) {
+    const stack = clientUndoStacks.get(clientId);
+    if (stack && stack.length > 0) {
+      return stack[stack.length - 1].description;
+    }
+    return null;
+  }
+
+  static getRedoDescription(clientId) {
+    const stack = clientRedoStacks.get(clientId);
+    if (stack && stack.length > 0) {
+      return stack[stack.length - 1].description;
+    }
+    return null;
+  }
+
+  static performUndo(clientId) {
+    const undoStack = clientUndoStacks.get(clientId);
+    const redoStack = clientRedoStacks.get(clientId);
+
+    if (!undoStack || undoStack.length === 0) {
+      return null;
+    }
+
+    const entry = undoStack.pop();
+    redoStack.push(entry);
+
+    return entry;
+  }
+
+  static performRedo(clientId) {
+    const undoStack = clientUndoStacks.get(clientId);
+    const redoStack = clientRedoStacks.get(clientId);
+
+    if (!redoStack || redoStack.length === 0) {
+      return null;
+    }
+
+    const entry = redoStack.pop();
+    undoStack.push(entry);
+
+    return entry;
+  }
+
+  static clearStacks(clientId) {
+    clientUndoStacks.delete(clientId);
+    clientRedoStacks.delete(clientId);
   }
 }
 
-process.on('SIGINT', async () => {
-  await flushPendingSaves();
-  process.exit();
-});
-
+// Create Express app
 const app = express();
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: '*' },
-  pingTimeout: 60000,
-  pingInterval: 25000
+  cors: {
+    origin: process.env.CORS_ORIGIN || "*",
+    methods: ["GET", "POST", "PUT", "DELETE"]
+  }
 });
 
+// Initialize database
 init();
 
-const corsOrigin = process.env.CORS_ORIGIN || '*';
-app.use(cors({ origin: corsOrigin }));
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json({ limit: '5mb' }));
+// Enhanced middleware
+app.use(helmet({
+  contentSecurityPolicy: false // Disable CSP to allow CDN resources
+}));
 
-// Serve the static front‑end files
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || "*",
+  credentials: true
+}));
+
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, '..', 'shopping-list-app')));
+
+// Scheduled save with debouncing
+let saveTimer = null;
+const scheduleSave = () => {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveData(appData);
+    saveTimer = null;
+  }, 2000);
+};
 
 // Enhanced utility functions for data merging and validation
 function validateDataStructure(data) {
@@ -104,13 +324,6 @@ function validateDataStructure(data) {
 
   return true;
 }
-
-function generateChecksum(data) {
-  const crypto = require('crypto');
-  const jsonString = JSON.stringify(data, Object.keys(data).sort());
-  return crypto.createHash('sha256').update(jsonString).digest('hex');
-}
-
 
 function applyOperation(operation, targetData = appData) {
   const { type, path, data } = operation;
@@ -189,193 +402,43 @@ function applyOperation(operation, targetData = appData) {
   }
 }
 
-function resolveConflicts(baseData, clientData, serverData) {
-  // Implement three-way merge algorithm
-  const resolved = JSON.parse(JSON.stringify(serverData)); // Start with server state
+// Helper function to get previous data for undo operations
+function getPreviousDataForPath(path, previousState) {
+  try {
+    const parts = (path || '').split('/');
+    if (!parts.length) return null;
 
-  // Merge lists with conflict detection
-  resolved.lists = mergeListsWithConflictDetection(
-    baseData.lists || [],
-    clientData.lists || [],
-    serverData.lists || []
-  );
-
-  // Merge global items
-  resolved.globalItems = mergeArraysById(
-    clientData.globalItems || [],
-    serverData.globalItems || [],
-    'id'
-  );
-
-  // Merge categories (server wins for structural changes)
-  resolved.categories = serverData.categories || [];
-
-  return resolved;
-}
-
-function mergeListsWithConflictDetection(baseLists, clientLists, serverLists) {
-  const merged = [];
-
-  // Create maps for efficient lookup
-  const baseMap = new Map(baseLists.map(l => [l.id, l]));
-  const clientMap = new Map(clientLists.map(l => [l.id, l]));
-  const serverMap = new Map(serverLists.map(l => [l.id, l]));
-
-  // Get all unique list IDs
-  const allIds = new Set([
-    ...baseLists.map(l => l.id),
-    ...clientLists.map(l => l.id),
-    ...serverLists.map(l => l.id)
-  ]);
-
-  for (const id of allIds) {
-    const baseList = baseMap.get(id);
-    const clientList = clientMap.get(id);
-    const serverList = serverMap.get(id);
-
-    if (!clientList && !serverList) {
-      // List deleted by both - skip
-    } else if (!clientList) {
-      // List exists on server only
-      merged.push(serverList);
-    } else if (!serverList) {
-      // List exists on client only
-      merged.push(clientList);
-    } else {
-      // List exists on both - merge
-      const mergedList = mergeList(baseList, clientList, serverList);
-      merged.push(mergedList);
+    if (parts[0] === 'lists') {
+      const listId = parts[1];
+      const list = (previousState.lists || []).find(l => l.id === listId);
+      if (!list) return null;
+      if (parts.length === 2) {
+        return JSON.parse(JSON.stringify(list));
+      }
+      if (parts[2] === 'items' && parts[3]) {
+        const itemId = parts[3];
+        const item = (list.items || []).find(i => i.id === itemId);
+        return item ? JSON.parse(JSON.stringify(item)) : null;
+      }
+      return null;
     }
-  }
 
-  return merged;
-}
-
-function mergeList(baseList, clientList, serverList) {
-  const merged = {
-    id: clientList.id,
-    name: clientList.name, // Prefer client name changes
-    items: [],
-    isCompleted: serverList.isCompleted, // Server wins for completion state
-    completedAt: serverList.completedAt,
-    createdAt: baseList?.createdAt || clientList.createdAt || serverList.createdAt,
-    updatedAt: new Date().toISOString()
-  };
-
-  // Merge items using three-way merge
-  merged.items = mergeItemsThreeWay(
-    baseList?.items || [],
-    clientList.items || [],
-    serverList.items || []
-  );
-
-  return merged;
-}
-
-function mergeItemsThreeWay(baseItems, clientItems, serverItems) {
-  const merged = [];
-
-  // Create maps for efficient lookup
-  const clientMap = new Map(clientItems.map(i => [i.id, i]));
-  const serverMap = new Map(serverItems.map(i => [i.id, i]));
-
-  // Get all unique item IDs
-  const allIds = new Set([
-    ...baseItems.map(i => i.id),
-    ...clientItems.map(i => i.id),
-    ...serverItems.map(i => i.id)
-  ]);
-
-  for (const id of allIds) {
-    const clientItem = clientMap.get(id);
-    const serverItem = serverMap.get(id);
-
-    if (!clientItem && !serverItem) {
-      // Item deleted by both - skip
-    } else if (!clientItem) {
-      // Item exists on server only
-      merged.push(serverItem);
-    } else if (!serverItem) {
-      // Item exists on client only
-      merged.push(clientItem);
-    } else {
-      // Item exists on both - merge properties
-      const mergedItem = {
-        ...serverItem,
-        // Prefer client changes for user-modifiable fields
-        quantity: clientItem.quantity,
-        notes: clientItem.notes || serverItem.notes,
-        actualPrice: clientItem.actualPrice !== undefined ? clientItem.actualPrice : serverItem.actualPrice,
-        // Server wins for structural changes
-        isChecked: serverItem.isChecked,
-        globalItemId: serverItem.globalItemId
-      };
-      merged.push(mergedItem);
+    if (parts[0] === 'globalItems') {
+      const itemId = parts[1];
+      const item = (previousState.globalItems || []).find(i => i.id === itemId);
+      return item ? JSON.parse(JSON.stringify(item)) : null;
     }
-  }
 
-  return merged;
-}
-
-function mergeArraysById(clientArray, serverArray, idField) {
-  const clientMap = new Map(clientArray.map(item => [item[idField], item]));
-
-  // Start with server items
-  const result = [...serverArray];
-
-  // Add or update with client changes
-  for (const [id, clientItem] of clientMap) {
-    const existingIndex = result.findIndex(item => item[idField] === id);
-    if (existingIndex >= 0) {
-      // Merge existing item (prefer client changes for user-editable fields)
-      result[existingIndex] = {
-        ...result[existingIndex],
-        ...clientItem,
-        updatedAt: new Date().toISOString()
-      };
-    } else {
-      // Add new item from client
-      result.push({
-        ...clientItem,
-        createdAt: clientItem.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+    if (parts[0] === 'categories') {
+      const categoryId = parts[1];
+      const cat = (previousState.categories || []).find(c => c.id === categoryId);
+      return cat ? JSON.parse(JSON.stringify(cat)) : null;
     }
+
+    return null;
+  } catch (e) {
+    return null;
   }
-
-  return result;
-}
-
-// Enhanced data integrity and rollback
-function createDataSnapshot() {
-  return {
-    data: JSON.parse(JSON.stringify(appData)),
-    timestamp: new Date().toISOString(),
-    checksum: generateChecksum(appData)
-  };
-}
-
-const dataSnapshots = [];
-const MAX_SNAPSHOTS = 10;
-
-function saveSnapshot() {
-  const snapshot = createDataSnapshot();
-  dataSnapshots.push(snapshot);
-
-  if (dataSnapshots.length > MAX_SNAPSHOTS) {
-    dataSnapshots.shift();
-  }
-}
-
-function rollbackToSnapshot(index = -1) {
-  const snapshot = dataSnapshots[index] || dataSnapshots[dataSnapshots.length - 1];
-  if (snapshot) {
-    appData = JSON.parse(JSON.stringify(snapshot.data));
-    appData.revision += 1;
-    appData.lastModified = new Date().toISOString();
-    return true;
-  }
-  return false;
 }
 
 // REST endpoint: GET /data – return the entire app state
@@ -387,228 +450,257 @@ app.get('/data', (req, res) => {
   });
 });
 
-// Enhanced REST endpoint: PUT /data with better conflict resolution
+// Enhanced REST endpoint: PUT /data with intelligent conflict resolution
 app.put('/data', async (req, res) => {
-  const { clientId, changeId, baseRevision, operations: clientOps, ...newData } = req.body || {};
+  const { clientId, changeId, baseRevision, operations: clientOps, operationHistory, ...newData } = req.body || {};
 
   if (!validateDataStructure(newData)) {
     return res.status(400).json({ message: 'Invalid data structure' });
   }
 
   try {
-    let mergedData;
+    // Store previous state for undo operations
+    const previousState = JSON.parse(JSON.stringify(appData));
 
-    if (baseRevision != null && baseRevision < appData.revision) {
-      // Client is behind - attempt to merge changes
-      console.log(`Conflict detected: client revision ${baseRevision}, server revision ${appData.revision}`);
-      mergedData = mergeOperations(baseRevision, clientOps || [], newData, clientId);
+    // Apply operational transforms to handle concurrent operations
+    const transformedOps = [];
+    const recentOperationIds = new Set(appData.operations.map(op => op.id));
+    const recentServerOps = appData.operations.filter(op =>
+      op.timestamp > Date.now() - 30000 && op.clientId !== clientId
+    );
 
-      // Return merged data for client to review
-      return res.status(409).json({
-        ...mergedData,
-        revision: appData.revision,
-        message: 'Conflicts resolved through merge'
-      });
-    } else {
-      // Normal update
-      mergedData = { ...newData };
-    }
-
-    // Update server data
-    const oldRevision = appData.revision;
-    appData = {
-      ...mergedData,
-      revision: oldRevision + 1,
-      lastModified: new Date().toISOString(),
-      operations: appData.operations || []
-    };
-
-    // Track this operation
     if (clientOps && clientOps.length > 0) {
-      appData.operations.push(...clientOps.map(op => ({
-        ...op,
-        revision: appData.revision,
-        serverTimestamp: Date.now()
-      })));
+      for (const clientOp of clientOps) {
+        // Skip duplicate operations already processed (prevents double-undo entries)
+        if (clientOp && clientOp.id && recentOperationIds.has(clientOp.id)) {
+          continue;
+        }
+        let transformedOp = clientOp;
 
-      // Keep only recent operations (last 100)
-      appData.operations = appData.operations.slice(-100);
+        // Transform against recent server operations
+        for (const serverOp of recentServerOps) {
+          const [transformed1, transformed2] = OperationTransform.transform(transformedOp, serverOp);
+          transformedOp = transformed1;
+        }
+
+        if (transformedOp) {
+          // Store previous data for undo
+          transformedOp.previousData = getPreviousDataForPath(transformedOp.path, previousState);
+          transformedOps.push(transformedOp);
+        }
+      }
     }
+
+    // Apply transformed operations
+    let success = true;
+    for (const op of transformedOps) {
+      if (!applyOperation(op, appData)) {
+        success = false;
+        console.error('Failed to apply operation:', op);
+      } else {
+        // Add to undo system
+        UndoRedoManager.addOperation(clientId, op, op.description);
+      }
+    }
+
+    if (!success) {
+      return res.status(400).json({ message: 'Failed to apply some operations' });
+    }
+
+    // Update revision and metadata
+    const oldRevision = appData.revision;
+    appData.revision = oldRevision + 1;
+    appData.lastModified = new Date().toISOString();
+
+    // Track operations (deduplicated)
+    transformedOps.forEach(op => {
+      if (!recentOperationIds.has(op.id)) {
+        appData.operations.push({
+          ...op,
+          revision: appData.revision,
+          serverTimestamp: Date.now()
+        });
+        recentOperationIds.add(op.id);
+      }
+    });
+    appData.operations = appData.operations.slice(-200); // Keep more history
 
     scheduleSave();
 
-    // Enhanced broadcasting with specific event types
-    broadcastDataUpdate(clientId, changeId, clientOps, mergedData);
+    // Enhanced broadcasting with operation details
+    broadcastSeamlessUpdate(clientId, changeId, transformedOps, appData);
 
     res.json({
-      message: 'Data updated successfully',
+      message: 'Operations applied successfully',
       revision: appData.revision,
-      timestamp: appData.lastModified
+      timestamp: appData.lastModified,
+      appliedOperations: transformedOps.length,
+      undoAvailable: UndoRedoManager.canUndo(clientId),
+      redoAvailable: UndoRedoManager.canRedo(clientId),
+      undoDescription: UndoRedoManager.getUndoDescription(clientId),
+      redoDescription: UndoRedoManager.getRedoDescription(clientId)
     });
 
   } catch (error) {
-    console.error('Error updating data:', error);
+    console.error('Error applying operations:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-// Enhanced broadcasting function for specific operations
-function broadcastDataUpdate(clientId, changeId, operations, data) {
-  // General data update
+// Enhanced undo endpoint
+app.post('/undo', (req, res) => {
+  const { clientId } = req.body || {};
+
+  if (!clientId) {
+    return res.status(400).json({ message: 'Client ID required' });
+  }
+
+  const undoEntry = UndoRedoManager.performUndo(clientId);
+
+  if (!undoEntry) {
+    return res.status(404).json({ message: 'Nothing to undo' });
+  }
+
+  try {
+    // Apply the inverse operation
+    const success = applyOperation(undoEntry.inverseOperation, appData);
+
+    if (success) {
+      appData.revision++;
+      appData.lastModified = new Date().toISOString();
+
+      // Track the undo operation
+      const undoOp = {
+        ...undoEntry.inverseOperation,
+        type: 'undo',
+        description: `Undo: ${undoEntry.description}`,
+        clientId,
+        timestamp: Date.now(),
+        revision: appData.revision
+      };
+
+      appData.operations.push(undoOp);
+      scheduleSave();
+
+      // Broadcast undo
+      io.emit('undoPerformed', {
+        clientId,
+        operation: undoOp,
+        description: undoEntry.description,
+        data: appData
+      });
+
+      res.json({
+        message: 'Undo successful',
+        description: undoEntry.description,
+        revision: appData.revision,
+        undoAvailable: UndoRedoManager.canUndo(clientId),
+        redoAvailable: UndoRedoManager.canRedo(clientId),
+        undoDescription: UndoRedoManager.getUndoDescription(clientId),
+        redoDescription: UndoRedoManager.getRedoDescription(clientId)
+      });
+    } else {
+      res.status(500).json({ message: 'Failed to apply undo operation' });
+    }
+  } catch (error) {
+    console.error('Undo operation failed:', error);
+    res.status(500).json({ message: 'Undo operation failed' });
+  }
+});
+
+// Enhanced redo endpoint
+app.post('/redo', (req, res) => {
+  const { clientId } = req.body || {};
+
+  if (!clientId) {
+    return res.status(400).json({ message: 'Client ID required' });
+  }
+
+  const redoEntry = UndoRedoManager.performRedo(clientId);
+
+  if (!redoEntry) {
+    return res.status(404).json({ message: 'Nothing to redo' });
+  }
+
+  try {
+    // Apply the original operation
+    const success = applyOperation(redoEntry.operation, appData);
+
+    if (success) {
+      appData.revision++;
+      appData.lastModified = new Date().toISOString();
+
+      // Track the redo operation
+      const redoOp = {
+        ...redoEntry.operation,
+        type: 'redo',
+        description: `Redo: ${redoEntry.description}`,
+        clientId,
+        timestamp: Date.now(),
+        revision: appData.revision
+      };
+
+      appData.operations.push(redoOp);
+      scheduleSave();
+
+      // Broadcast redo
+      io.emit('redoPerformed', {
+        clientId,
+        operation: redoOp,
+        description: redoEntry.description,
+        data: appData
+      });
+
+      res.json({
+        message: 'Redo successful',
+        description: redoEntry.description,
+        revision: appData.revision,
+        undoAvailable: UndoRedoManager.canUndo(clientId),
+        redoAvailable: UndoRedoManager.canRedo(clientId),
+        undoDescription: UndoRedoManager.getUndoDescription(clientId),
+        redoDescription: UndoRedoManager.getRedoDescription(clientId)
+      });
+    } else {
+      res.status(500).json({ message: 'Failed to apply redo operation' });
+    }
+  } catch (error) {
+    console.error('Redo operation failed:', error);
+    res.status(500).json({ message: 'Redo operation failed' });
+  }
+});
+
+// Get undo/redo status for a client
+app.get('/undo-status/:clientId', (req, res) => {
+  const { clientId } = req.params;
+
+  res.json({
+    undoAvailable: UndoRedoManager.canUndo(clientId),
+    redoAvailable: UndoRedoManager.canRedo(clientId),
+    undoDescription: UndoRedoManager.getUndoDescription(clientId),
+    redoDescription: UndoRedoManager.getRedoDescription(clientId)
+  });
+});
+
+// Enhanced broadcasting for seamless updates
+function broadcastSeamlessUpdate(clientId, changeId, operations, updatedData) {
+  // Main data update
   io.emit('dataUpdated', {
-    data: appData,
+    data: updatedData,
     clientId,
     changeId,
-    operations
+    operations,
+    seamless: true
   });
 
-  // Notify clients that a batch of operations has been applied (aligns with DataService expectations)
+  // Operation-specific broadcasts
   if (operations && operations.length > 0) {
     io.emit('operationsApplied', {
       operations,
-      revision: appData.revision,
-      clientId
+      revision: updatedData.revision,
+      clientId,
+      seamless: true
     });
   }
-
-  // Specific operation broadcasts
-  if (operations && operations.length > 0) {
-    operations.forEach(op => {
-      switch (op.type) {
-        case 'create':
-          if (op.path.includes('items')) {
-            broadcastItemAdded(op, clientId);
-          } else if (op.path === 'lists') {
-            broadcastListAdded(op, clientId);
-          } else if (op.path === 'categories') {
-            broadcastCategoryAdded(op, clientId);
-          }
-          break;
-        case 'update':
-          if (op.path.includes('items')) {
-            broadcastItemUpdated(op, clientId);
-          } else if (op.path.startsWith('lists/') && !op.path.includes('items')) {
-            broadcastListUpdated(op, clientId);
-          }
-          break;
-        case 'delete':
-          if (op.path.includes('items')) {
-            broadcastItemDeleted(op, clientId);
-          } else if (op.path.startsWith('lists/')) {
-            broadcastListDeleted(op, clientId);
-          }
-          break;
-      }
-    });
-  }
-}
-
-function broadcastItemAdded(operation, excludeClientId) {
-  const { path, data: itemData } = operation;
-  const listId = path.split('/')[1];
-
-  // Get the global item to include name
-  const globalItem = appData.globalItems.find(g => g.id === itemData.globalItemId);
-  const itemWithName = {
-    ...itemData,
-    name: globalItem ? globalItem.name : 'Unknown Item',
-    categoryName: getCategoryName(globalItem?.categoryId)
-  };
-
-  io.emit('itemAdded', {
-    listId,
-    item: itemWithName,
-    clientId: excludeClientId
-  });
-}
-
-function broadcastItemUpdated(operation, excludeClientId) {
-  const { path, data: itemData } = operation;
-  const pathParts = path.split('/');
-  const listId = pathParts[1];
-  const itemId = pathParts[3];
-
-  // Get the global item to include name
-  const globalItem = appData.globalItems.find(g => g.id === itemData.globalItemId);
-  const itemWithName = {
-    ...itemData,
-    name: globalItem ? globalItem.name : 'Unknown Item',
-    categoryName: getCategoryName(globalItem?.categoryId)
-  };
-
-  io.emit('itemUpdated', {
-    listId,
-    itemId,
-    item: itemWithName,
-    clientId: excludeClientId
-  });
-}
-
-function broadcastItemDeleted(operation, excludeClientId) {
-  const { path } = operation;
-  const pathParts = path.split('/');
-  const listId = pathParts[1];
-  const itemId = pathParts[3];
-
-  // Find the item being deleted to include its name in the broadcast
-  const list = appData.lists.find(l => l.id === listId);
-  let itemName = 'Unknown Item';
-  if (list) {
-    const item = list.items.find(i => i.id === itemId);
-    if (item) {
-      const globalItem = appData.globalItems.find(g => g.id === item.globalItemId);
-      itemName = globalItem ? globalItem.name : 'Unknown Item';
-    }
-  }
-
-  io.emit('itemDeleted', {
-    listId,
-    itemId,
-    itemName,
-    clientId: excludeClientId
-  });
-}
-
-function broadcastListAdded(operation, excludeClientId) {
-  const { data: listData } = operation;
-
-  io.emit('listAdded', {
-    list: listData,
-    clientId: excludeClientId
-  });
-}
-
-function broadcastListUpdated(operation, excludeClientId) {
-  const { data: listData } = operation;
-
-  io.emit('listUpdated', {
-    list: listData,
-    clientId: excludeClientId
-  });
-}
-
-function broadcastListDeleted(operation, excludeClientId) {
-  const { path } = operation;
-  const listId = path.split('/')[1];
-
-  io.emit('listDeleted', {
-    listId,
-    clientId: excludeClientId
-  });
-}
-
-function broadcastCategoryAdded(operation, excludeClientId) {
-  const { data: categoryData } = operation;
-
-  io.emit('categoryAdded', {
-    category: categoryData,
-    clientId: excludeClientId
-  });
-}
-
-function getCategoryName(categoryId) {
-  const category = appData.categories.find(c => c.id === categoryId);
-  return category ? (category.names?.en || category.names?.he || category.id) : 'Other';
 }
 
 // Enhanced user presence tracking
@@ -667,34 +759,171 @@ app.post('/data/clear', async (req, res) => {
   res.json({ message: 'Data cleared' });
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    revision: appData.revision,
+    connectedUsers: connectedUsers.size,
+    activeEditors: activeEditors.size,
+    uptime: process.uptime()
+  });
+});
+
 // Enhanced WebSocket connection handling
 io.on('connection', socket => {
   const clientId = socket.handshake.query.clientId || socket.id;
 
   console.log(`Client connected: ${clientId}`);
 
-  // Send initial data
+  // Send initial data including undo/redo status
   socket.emit('dataUpdated', {
     data: appData,
     connectedUsers: Array.from(connectedUsers.values()),
-    activeEditors: Object.fromEntries(activeEditors)
+    activeEditors: Object.fromEntries(activeEditors),
+    undoAvailable: UndoRedoManager.canUndo(clientId),
+    redoAvailable: UndoRedoManager.canRedo(clientId),
+    undoDescription: UndoRedoManager.getUndoDescription(clientId),
+    redoDescription: UndoRedoManager.getRedoDescription(clientId)
   });
 
-  // Handle real-time operations
+  // Handle real-time operations with transformation
   socket.on('operation', (operation) => {
     try {
-      const op = { ...operation, serverTimestamp: Date.now() };
-      applyOperation(op);
-      appData.operations.push(op);
-      appData.revision++;
-      scheduleSave();
+      const op = {
+        ...operation,
+        serverTimestamp: Date.now(),
+        clientId: clientId
+      };
 
-      // Acknowledge sender and broadcast to others
-      socket.emit('operationAck', { id: op.id, revision: appData.revision });
-      socket.broadcast.emit('operationReceived', op);
+      // Capture previous data for reliable undo if not supplied by client
+      op.previousData = op.previousData || getPreviousDataForPath(op.path, appData);
+
+      // Transform against recent operations
+      const recentOps = appData.operations.filter(serverOp =>
+        serverOp.timestamp > Date.now() - 10000 && serverOp.clientId !== clientId
+      );
+
+      let transformedOp = op;
+      for (const serverOp of recentOps) {
+        const [transformed1] = OperationTransform.transform(transformedOp, serverOp);
+        transformedOp = transformed1;
+      }
+
+      if (transformedOp && applyOperation(transformedOp)) {
+        appData.operations.push(transformedOp);
+        appData.revision++;
+
+        // Add to undo system
+        UndoRedoManager.addOperation(clientId, transformedOp, transformedOp.description);
+
+        scheduleSave();
+
+        // Acknowledge sender
+        socket.emit('operationAck', {
+          id: transformedOp.id,
+          revision: appData.revision,
+          undoAvailable: UndoRedoManager.canUndo(clientId),
+          redoAvailable: UndoRedoManager.canRedo(clientId),
+          undoDescription: UndoRedoManager.getUndoDescription(clientId),
+          redoDescription: UndoRedoManager.getRedoDescription(clientId)
+        });
+
+        // Broadcast to others
+        socket.broadcast.emit('operationReceived', transformedOp);
+      }
     } catch (error) {
       console.error('Error handling operation:', error);
       socket.emit('operationError', { error: error.message });
+    }
+  });
+
+  // Handle undo requests
+  socket.on('requestUndo', () => {
+    const undoEntry = UndoRedoManager.performUndo(clientId);
+
+    if (undoEntry) {
+      try {
+        const success = applyOperation(undoEntry.inverseOperation, appData);
+
+        if (success) {
+          appData.revision++;
+
+          const undoOp = {
+            ...undoEntry.inverseOperation,
+            type: 'undo',
+            description: `Undo: ${undoEntry.description}`,
+            clientId,
+            timestamp: Date.now()
+          };
+
+          appData.operations.push(undoOp);
+          scheduleSave();
+
+          // Send undo result to requester
+          socket.emit('undoResult', {
+            success: true,
+            description: undoEntry.description,
+            undoAvailable: UndoRedoManager.canUndo(clientId),
+            redoAvailable: UndoRedoManager.canRedo(clientId),
+            undoDescription: UndoRedoManager.getUndoDescription(clientId),
+            redoDescription: UndoRedoManager.getRedoDescription(clientId)
+          });
+
+          // Broadcast to others
+          socket.broadcast.emit('operationReceived', undoOp);
+          io.emit('dataUpdated', { data: appData, source: 'undo' });
+        }
+      } catch (error) {
+        socket.emit('undoResult', { success: false, error: error.message });
+      }
+    } else {
+      socket.emit('undoResult', { success: false, message: 'Nothing to undo' });
+    }
+  });
+
+  // Handle redo requests
+  socket.on('requestRedo', () => {
+    const redoEntry = UndoRedoManager.performRedo(clientId);
+
+    if (redoEntry) {
+      try {
+        const success = applyOperation(redoEntry.operation, appData);
+
+        if (success) {
+          appData.revision++;
+
+          const redoOp = {
+            ...redoEntry.operation,
+            type: 'redo',
+            description: `Redo: ${redoEntry.description}`,
+            clientId,
+            timestamp: Date.now()
+          };
+
+          appData.operations.push(redoOp);
+          scheduleSave();
+
+          // Send redo result to requester
+          socket.emit('redoResult', {
+            success: true,
+            description: redoEntry.description,
+            undoAvailable: UndoRedoManager.canUndo(clientId),
+            redoAvailable: UndoRedoManager.canRedo(clientId),
+            undoDescription: UndoRedoManager.getUndoDescription(clientId),
+            redoDescription: UndoRedoManager.getRedoDescription(clientId)
+          });
+
+          // Broadcast to others
+          socket.broadcast.emit('operationReceived', redoOp);
+          io.emit('dataUpdated', { data: appData, source: 'redo' });
+        }
+      } catch (error) {
+        socket.emit('redoResult', { success: false, error: error.message });
+      }
+    } else {
+      socket.emit('redoResult', { success: false, message: 'Nothing to redo' });
     }
   });
 
@@ -724,6 +953,13 @@ io.on('connection', socket => {
         activeEditors.delete(key);
       }
     }
+
+    // Clean up undo/redo stacks after 1 hour of inactivity
+    setTimeout(() => {
+      if (!connectedUsers.has(clientId)) {
+        UndoRedoManager.clearStacks(clientId);
+      }
+    }, 60 * 60 * 1000);
 
     io.emit('presenceUpdate', {
       connectedUsers: Array.from(connectedUsers.values()),
@@ -764,274 +1000,3 @@ loadData()
       console.log(`Shopping List server running on http://localhost:${PORT}`);
     });
   });
-
-function mergeOperations(baseRevision, operations, newData, clientId) {
-  // Create a working copy of current server data
-  const conflictingOps = appData.operations.filter(op =>
-    op.revision > baseRevision && op.clientId !== clientId
-  );
-
-  if (conflictingOps.length === 0) {
-    // No conflicts, use client data directly
-    return newData;
-  }
-
-  // Implement intelligent merging based on operation types
-  console.log(`Merging ${conflictingOps.length} conflicting operations`);
-
-  // Use three-way merge with the base revision data
-  const baseData = getDataAtRevision(baseRevision) || appData;
-  return resolveConflicts(baseData, newData, appData);
-}
-
-function getDataAtRevision(revision) {
-  // Try to reconstruct data at specific revision from snapshots
-  const snapshot = dataSnapshots.find(s =>
-    s.data.revision <= revision
-  );
-  return snapshot ? snapshot.data : null;
-}
-
-// Enhanced endpoints for better conflict handling
-app.post('/data/merge', async (req, res) => {
-  const { clientData, baseRevision, clientId } = req.body || {};
-
-  if (!validateDataStructure(clientData)) {
-    return res.status(400).json({ message: 'Invalid client data structure' });
-  }
-
-  try {
-    // Save current state before attempting merge
-    saveSnapshot();
-
-    const baseData = getDataAtRevision(baseRevision) || appData;
-    const mergedData = resolveConflicts(baseData, clientData, appData);
-
-    // Validate merged result
-    if (!validateDataStructure(mergedData)) {
-      return res.status(409).json({
-        message: 'Merge resulted in invalid data structure',
-        suggestion: 'manual_resolution_required'
-      });
-    }
-
-    // Apply merged data
-    const oldRevision = appData.revision;
-    appData = {
-      ...mergedData,
-      revision: oldRevision + 1,
-      lastModified: new Date().toISOString(),
-      operations: appData.operations,
-      checksum: generateChecksum(mergedData)
-    };
-
-    scheduleSave();
-
-    // Broadcast merged result
-    io.emit('dataUpdated', {
-      data: appData,
-      clientId,
-      mergeResult: true
-    });
-
-    res.json({
-      message: 'Data merged successfully',
-      revision: appData.revision,
-      conflicts: [], // Could include conflict details
-      mergedData: appData
-    });
-
-  } catch (error) {
-    console.error('Error during merge:', error);
-
-    // Attempt rollback on merge failure
-    if (rollbackToSnapshot()) {
-      console.log('Rolled back to previous snapshot');
-    }
-
-    res.status(500).json({
-      message: 'Merge failed, rolled back to previous state',
-      error: error.message
-    });
-  }
-});
-
-// Endpoint for getting conflict details
-app.post('/data/conflicts', (req, res) => {
-  const { clientData, baseRevision } = req.body || {};
-
-  try {
-    const baseData = getDataAtRevision(baseRevision) || appData;
-    const conflicts = detectConflicts(baseData, clientData, appData);
-
-    res.json({
-      conflicts,
-      canAutoResolve: conflicts.every(c => c.autoResolvable),
-      suggestedResolution: conflicts.length > 0 ? 'merge' : 'direct_apply'
-    });
-
-  } catch (error) {
-    res.status(500).json({ message: 'Error detecting conflicts' });
-  }
-});
-
-function detectConflicts(baseData, clientData, serverData) {
-  const conflicts = [];
-
-  // Check for list conflicts
-  const clientListMap = new Map((clientData.lists || []).map(l => [l.id, l]));
-  const serverListMap = new Map((serverData.lists || []).map(l => [l.id, l]));
-  const baseListMap = new Map((baseData.lists || []).map(l => [l.id, l]));
-
-  for (const [listId, clientList] of clientListMap) {
-    const serverList = serverListMap.get(listId);
-    const baseList = baseListMap.get(listId);
-
-    if (serverList && baseList) {
-      // Check if both client and server modified the same list
-      const clientModified = JSON.stringify(clientList) !== JSON.stringify(baseList);
-      const serverModified = JSON.stringify(serverList) !== JSON.stringify(baseList);
-
-      if (clientModified && serverModified) {
-        conflicts.push({
-          type: 'list_modification',
-          listId,
-          clientVersion: clientList,
-          serverVersion: serverList,
-          baseVersion: baseList,
-          autoResolvable: isListConflictAutoResolvable(clientList, serverList, baseList)
-        });
-      }
-    }
-  }
-
-  // Check for item conflicts within lists
-  for (const [listId, clientList] of clientListMap) {
-    const serverList = serverListMap.get(listId);
-    if (serverList) {
-      const itemConflicts = detectItemConflicts(clientList.items, serverList.items, listId);
-      conflicts.push(...itemConflicts);
-    }
-  }
-
-  return conflicts;
-}
-
-function isListConflictAutoResolvable(clientList, serverList, baseList) {
-  // Simple heuristic: auto-resolvable if only one side changed the name
-  // and the other side only changed items
-  const clientNameChanged = clientList.name !== baseList.name;
-  const serverNameChanged = serverList.name !== baseList.name;
-
-  if (clientNameChanged && serverNameChanged) {
-    return false; // Both changed name - needs manual resolution
-  }
-
-  return true; // Can merge automatically
-}
-
-function detectItemConflicts(clientItems, serverItems, listId) {
-  const conflicts = [];
-  const clientItemMap = new Map(clientItems.map(i => [i.id, i]));
-  const serverItemMap = new Map(serverItems.map(i => [i.id, i]));
-
-  for (const [itemId, clientItem] of clientItemMap) {
-    const serverItem = serverItemMap.get(itemId);
-    if (serverItem) {
-      // Check for conflicting modifications
-      const hasConflict = (
-        clientItem.quantity !== serverItem.quantity ||
-        clientItem.isChecked !== serverItem.isChecked
-      );
-
-      if (hasConflict) {
-        conflicts.push({
-          type: 'item_modification',
-          listId,
-          itemId,
-          clientVersion: clientItem,
-          serverVersion: serverItem,
-          autoResolvable: clientItem.isChecked === serverItem.isChecked // Only quantity conflicts are auto-resolvable
-        });
-      }
-    }
-  }
-
-  return conflicts;
-}
-
-// Enhanced rollback endpoint
-app.post('/data/rollback', async (req, res) => {
-  const { snapshotIndex, reason } = req.body || {};
-
-  try {
-    const success = rollbackToSnapshot(snapshotIndex);
-
-    if (success) {
-      scheduleSave();
-
-      io.emit('dataUpdated', {
-        data: appData,
-        rollback: true,
-        reason
-      });
-
-      res.json({
-        message: 'Successfully rolled back to previous state',
-        revision: appData.revision
-      });
-    } else {
-      res.status(404).json({ message: 'No snapshot available for rollback' });
-    }
-
-  } catch (error) {
-    console.error('Rollback failed:', error);
-    res.status(500).json({ message: 'Rollback operation failed' });
-  }
-});
-
-// Health check endpoint with conflict statistics
-app.get('/health', (req, res) => {
-  const health = {
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    revision: appData.revision,
-    connectedUsers: connectedUsers.size,
-    activeEditors: activeEditors.size,
-    pendingOperations: pendingOperations.size,
-    recentOperations: appData.operations.length,
-    snapshots: dataSnapshots.length,
-    uptime: process.uptime()
-  };
-
-  res.json(health);
-});
-
-// Periodic cleanup of old operations and expired presence
-setInterval(() => {
-  // Clean up old operations (keep only last 24 hours)
-  const cutoff = Date.now() - (24 * 60 * 60 * 1000);
-  appData.operations = appData.operations.filter(op => op.timestamp > cutoff);
-
-  // Clean up inactive users (no activity for 30 minutes)
-  const inactiveCutoff = Date.now() - (30 * 60 * 1000);
-  for (const [clientId, user] of connectedUsers) {
-    if (new Date(user.lastActivity).getTime() < inactiveCutoff) {
-      connectedUsers.delete(clientId);
-    }
-  }
-
-  // Clean up stale editor locks (no activity for 5 minutes)
-  const editorCutoff = Date.now() - (5 * 60 * 1000);
-  for (const [key, editor] of activeEditors) {
-    if (new Date(editor.startedAt).getTime() < editorCutoff) {
-      activeEditors.delete(key);
-    }
-  }
-
-}, 5 * 60 * 1000); // Run every 5 minutes
-
-// Save snapshots periodically
-setInterval(() => {
-  saveSnapshot();
-}, 10 * 60 * 1000); // Save snapshot every 10 minutes
